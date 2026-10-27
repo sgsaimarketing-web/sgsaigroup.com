@@ -51,6 +51,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 }) => {
   const [showPresets, setShowPresets] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewAspect, setPreviewAspect] = useState<'current' | 'portrait' | 'landscape'>('current');
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,6 +59,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     if (!file) return;
 
     setIsUploading(true);
+    setUploadError(null);
     const isVideo = file.type.startsWith('video/');
     const reader = new FileReader();
 
@@ -71,7 +73,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     };
 
     reader.onerror = () => {
-      alert('Failed to read file. Please try another image or video.');
+      setUploadError('Failed to read file. Please try another image or video format.');
       setIsUploading(false);
     };
 
@@ -127,6 +129,12 @@ export const MediaControl: React.FC<MediaControlProps> = ({
           {mediaType} · {aspectRatio}
         </span>
       </div>
+
+      {uploadError && (
+        <div className="mb-3 rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300">
+          {uploadError}
+        </div>
+      )}
 
       {/* Visual Preview Box */}
       <div className="relative mb-3 flex flex-col items-center justify-center rounded-lg border border-white/10 bg-black/40 p-2 overflow-hidden">

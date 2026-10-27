@@ -52,10 +52,7 @@ export const ExpertiseEditor: React.FC = () => {
   };
 
   const removeCap = (index: number) => {
-    if (expertise.capabilities.length <= 1) {
-      alert('You must maintain at least one expertise capability.');
-      return;
-    }
+    if (expertise.capabilities.length <= 1) return;
     const caps = expertise.capabilities.filter((_, i) => i !== index);
     updateExpertise({ capabilities: caps });
   };
@@ -195,8 +192,9 @@ export const ExpertiseEditor: React.FC = () => {
                 <button
                   type="button"
                   title="Delete Capability"
+                  disabled={expertise.capabilities.length <= 1}
                   onClick={() => removeCap(idx)}
-                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1"
+                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1 disabled:opacity-20 disabled:pointer-events-none"
                 >
                   <Trash2 className="size-3.5" />
                 </button>

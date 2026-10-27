@@ -19,7 +19,7 @@ export interface IndustryItem {
   image: string;
   imageAlt: string;
   cropAspect?: '16:9' | '4:3' | '1:1' | 'auto';
-  focalPoint?: 'center' | 'top' | 'bottom';
+  focalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
 }
 
 export interface CapabilityItem {

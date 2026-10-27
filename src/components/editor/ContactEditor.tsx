@@ -25,10 +25,7 @@ export const ContactEditor: React.FC = () => {
   };
 
   const removeDetail = (index: number) => {
-    if (contact.details.length <= 1) {
-      alert('Must have at least one verified contact coordinate.');
-      return;
-    }
+    if (contact.details.length <= 1) return;
     const details = contact.details.filter((_, i) => i !== index);
     updateContact({ details });
   };
@@ -146,8 +143,9 @@ export const ContactEditor: React.FC = () => {
                 <button
                   type="button"
                   title="Delete Channel"
+                  disabled={contact.details.length <= 1}
                   onClick={() => removeDetail(idx)}
-                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1"
+                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1 disabled:opacity-20 disabled:pointer-events-none"
                 >
                   <Trash2 className="size-3.5" />
                 </button>

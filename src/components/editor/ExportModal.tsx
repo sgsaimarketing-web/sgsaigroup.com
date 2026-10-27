@@ -33,6 +33,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
   const [importText, setImportText] = useState('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [publishResult, setPublishResult] = useState<{
     success: boolean;
     message: string;
@@ -262,18 +263,37 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
         </div>
 
         <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm('Revert all edits back to code defaults?')) {
-                resetToDefaults();
-                onClose();
-              }
-            }}
-            className="text-red-400 hover:text-red-300 hover:underline"
-          >
-            Reset All to Factory Defaults
-          </button>
+          {confirmReset ? (
+            <div className="flex items-center gap-2">
+              <span className="text-red-300">Are you sure? Reverts all edits:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  resetToDefaults();
+                  setConfirmReset(false);
+                  onClose();
+                }}
+                className="rounded bg-red-600 hover:bg-red-500 px-2 py-1 text-white font-bold"
+              >
+                Confirm Revert
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="text-white/60 hover:text-white underline text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmReset(true)}
+              className="text-red-400 hover:text-red-300 hover:underline"
+            >
+              Reset All to Factory Defaults
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

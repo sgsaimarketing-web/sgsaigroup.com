@@ -11,6 +11,7 @@ import {
   Minimize2,
   ChevronLeft,
   ChevronRight,
+  Video,
 } from 'lucide-react';
 import { CaseStudy, GalleryMediaItem } from '../data/siteContent.ts';
 
@@ -32,40 +33,53 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [isMuted, setIsMuted] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
+  const [videoError, setVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Prevent background scrolling when modal is open & autofocus modal
+  useEffect(() => {
+    if (!project) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    containerRef.current?.focus();
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [project]);
 
   useEffect(() => {
     setActiveMediaIndex(0);
     setIsPlayingVideo(false);
     setVideoProgress(0);
+    setVideoError(false);
   }, [project]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (isFullscreen) {
-          setIsFullscreen(false);
-        } else {
-          onClose();
-        }
-      } else if (e.key === 'ArrowRight' && project) {
-        handleNextMedia();
-      } else if (e.key === 'ArrowLeft' && project) {
-        handlePrevMedia();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [project, activeMediaIndex, isFullscreen]);
+  const currentCategoryProjects = project
+    ? allProjects.filter((p) => p.categoryId === project.categoryId)
+    : [];
+  const currentProjectIdx = project
+    ? currentCategoryProjects.findIndex((p) => p.id === project.id)
+    : -1;
 
-  if (!project) return null;
+  const handleNextProject = () => {
+    if (currentCategoryProjects.length <= 1) return;
+    const nextIdx = (currentProjectIdx + 1) % currentCategoryProjects.length;
+    onSelectProject(currentCategoryProjects[nextIdx]);
+  };
 
-  // Resolve gallery items
+  const handlePrevProject = () => {
+    if (currentCategoryProjects.length <= 1) return;
+    const prevIdx =
+      (currentProjectIdx - 1 + currentCategoryProjects.length) % currentCategoryProjects.length;
+    onSelectProject(currentCategoryProjects[prevIdx]);
+  };
+
   const galleryItems: GalleryMediaItem[] =
-    project.gallery && project.gallery.length > 0
+    project?.gallery && project.gallery.length > 0
       ? project.gallery
-      : project.thumbnails.map((url, i) => ({
+      : project?.thumbnails && project.thumbnails.length > 0
+      ? project.thumbnails.map((url, i) => ({
           id: `media-${i}`,
           url,
           type: project.hasVideo && i === 0 ? 'video' : 'image',
@@ -73,39 +87,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           fit: project.coverFit || 'cover',
           focalPoint: project.coverFocalPoint || 'center',
           caption: `${project.title} - Asset 0${i + 1}`,
-        }));
-
-  const currentMedia = galleryItems[activeMediaIndex] || {
-    url: project.coverImage,
-    type: 'image',
-    fit: 'cover',
-    focalPoint: 'center',
-  };
-
-  const currentCategoryProjects = allProjects.filter(
-    (p) => p.categoryId === project.categoryId
-  );
-  const currentProjectIdx = currentCategoryProjects.findIndex((p) => p.id === project.id);
-
-  const handleNextProject = () => {
-    const nextIdx = (currentProjectIdx + 1) % currentCategoryProjects.length;
-    onSelectProject(currentCategoryProjects[nextIdx]);
-  };
-
-  const handlePrevProject = () => {
-    const prevIdx =
-      (currentProjectIdx - 1 + currentCategoryProjects.length) % currentCategoryProjects.length;
-    onSelectProject(currentCategoryProjects[prevIdx]);
-  };
+        }))
+      : project
+      ? [
+          {
+            id: 'fallback-media',
+            url: project.coverImage,
+            type: project.hasVideo ? 'video' : 'image',
+            aspectRatio: '16:9',
+            fit: project.coverFit || 'cover',
+            focalPoint: project.coverFocalPoint || 'center',
+            caption: project.title,
+          },
+        ]
+      : [];
 
   const handleNextMedia = () => {
+    if (galleryItems.length <= 1) return;
     setActiveMediaIndex((prev) => (prev + 1) % galleryItems.length);
     setIsPlayingVideo(false);
+    setVideoError(false);
   };
 
   const handlePrevMedia = () => {
+    if (galleryItems.length <= 1) return;
     setActiveMediaIndex((prev) => (prev - 1 + galleryItems.length) % galleryItems.length);
     setIsPlayingVideo(false);
+    setVideoError(false);
   };
 
   const toggleVideoPlayback = () => {
@@ -114,9 +122,60 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       videoRef.current.pause();
       setIsPlayingVideo(false);
     } else {
-      videoRef.current.play();
-      setIsPlayingVideo(true);
+      videoRef.current
+        .play()
+        .then(() => setIsPlayingVideo(true))
+        .catch(() => setVideoError(true));
     }
+  };
+
+  // Keyboard navigation
+  useEffect(() => {
+    if (!project) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else {
+          onClose();
+        }
+      } else if (e.key === 'ArrowRight' && !e.shiftKey) {
+        handleNextMedia();
+      } else if (e.key === 'ArrowLeft' && !e.shiftKey) {
+        handlePrevMedia();
+      } else if ((e.key === 'ArrowRight' && e.shiftKey) || e.key.toLowerCase() === 'n') {
+        handleNextProject();
+      } else if ((e.key === 'ArrowLeft' && e.shiftKey) || e.key.toLowerCase() === 'p') {
+        handlePrevProject();
+      } else if (e.key === ' ' || e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        toggleVideoPlayback();
+      } else if (e.key.toLowerCase() === 'm') {
+        if (videoRef.current) {
+          videoRef.current.muted = !isMuted;
+          setIsMuted(!isMuted);
+        }
+      } else if (e.key.toLowerCase() === 'f') {
+        setIsFullscreen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [project, activeMediaIndex, isFullscreen, isMuted, isPlayingVideo, currentProjectIdx]);
+
+  if (!project) return null;
+
+  const currentMedia = galleryItems[activeMediaIndex] || {
+    url: project.coverImage,
+    type: 'image',
+    fit: 'cover',
+    focalPoint: 'center',
   };
 
   const handleTimeUpdate = () => {
@@ -129,12 +188,20 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const handleScrub = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!videoRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pos = (e.clientX - rect.left) / rect.width;
-    videoRef.current.currentTime = pos * videoRef.current.duration;
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    videoRef.current.currentTime = pos * (videoRef.current.duration || 1);
   };
 
   const isPortrait =
     currentMedia.aspectRatio === '9:16' || currentMedia.aspectRatio === '4:5';
+  const isSquare = currentMedia.aspectRatio === '1:1';
+  const isLetterboxed = isPortrait || isSquare || currentMedia.fit === 'contain';
+
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    const target = e.currentTarget;
+    target.onerror = null;
+    target.src = '/assets/work/luxury-fragrance.jpg';
+  };
 
   const getFocalClass = (f?: string) => {
     switch (f) {
@@ -161,7 +228,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     >
       <div
         ref={containerRef}
-        className={`relative w-full rounded-sm border border-white/10 bg-[#101318] text-white shadow-2xl transition-all ${
+        tabIndex={-1}
+        className={`relative w-full rounded-sm border border-white/10 bg-[#101318] text-white shadow-2xl transition-all focus:outline-none ${
           isFullscreen
             ? 'fixed inset-0 max-w-none max-h-none h-full w-full rounded-none overflow-y-auto'
             : 'max-w-6xl max-h-[94vh] overflow-y-auto'
@@ -182,7 +250,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <button
               type="button"
               onClick={() => setIsFullscreen(!isFullscreen)}
-              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen View'}
+              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen View (F)'}
               className="flex size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
             >
               {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -190,7 +258,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close project modal"
+              aria-label="Close project modal (Esc)"
               className="flex size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
             >
               <X className="size-5" />
@@ -205,7 +273,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             {/* Visual Screen Container */}
             <div className="relative aspect-[16/10] w-full overflow-hidden rounded-sm bg-black border border-white/10 shadow-lg flex items-center justify-center group">
               {/* Subtle Ambient Blurred Backdrop for Portrait or Letterbox Fit */}
-              {(isPortrait || currentMedia.fit === 'contain') && (
+              {isLetterboxed && (
                 <div
                   className="absolute inset-0 scale-125 opacity-30 blur-2xl pointer-events-none select-none bg-cover bg-center"
                   style={{ backgroundImage: `url(${currentMedia.url})` }}
@@ -216,68 +284,99 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               {/* Media Renderer: Video vs Image */}
               {currentMedia.type === 'video' ? (
                 <div className="relative h-full w-full flex items-center justify-center">
-                  <video
-                    ref={videoRef}
-                    src={currentMedia.url}
-                    poster={currentMedia.poster || project.coverImage}
-                    className={`h-full w-full ${
-                      currentMedia.fit === 'contain' || isPortrait
-                        ? 'object-contain max-h-full'
-                        : 'object-cover'
-                    } ${getFocalClass(currentMedia.focalPoint)}`}
-                    muted={isMuted}
-                    playsInline
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={() => setIsPlayingVideo(false)}
-                    onClick={toggleVideoPlayback}
-                  />
-
-                  {/* Big Center Play/Pause Overlay */}
-                  {!isPlayingVideo && (
-                    <button
-                      type="button"
-                      onClick={toggleVideoPlayback}
-                      aria-label="Play video"
-                      className="absolute inset-0 m-auto size-16 rounded-full bg-black/60 border border-white/30 backdrop-blur-sm flex items-center justify-center hover:bg-[#2563EB] hover:border-[#2563EB] transition-all cursor-pointer group/play shadow-2xl z-20"
-                    >
-                      <Play className="size-7 fill-white text-white ml-1 transition-transform group-hover/play:scale-110" />
-                    </button>
-                  )}
-
-                  {/* Interactive Video Playbar Controls */}
-                  <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 flex items-center gap-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    <button
-                      type="button"
-                      onClick={toggleVideoPlayback}
-                      className="text-white hover:text-[#38BDF8] transition"
-                    >
-                      {isPlayingVideo ? <Pause className="size-4" /> : <Play className="size-4" />}
-                    </button>
-
-                    {/* Progress Bar */}
-                    <div
-                      onClick={handleScrub}
-                      className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
-                    >
-                      <div
-                        className="h-full bg-[#2563EB] transition-all"
-                        style={{ width: `${videoProgress}%` }}
-                      />
+                  {videoError ? (
+                    <div className="flex flex-col items-center justify-center p-6 text-center text-[#94A3B8]">
+                      <Video className="size-10 text-white/30 mb-2" />
+                      <p className="text-xs font-semibold text-white">Video stream unavailable</p>
+                      <p className="text-[11px] text-white/50 max-w-xs mt-1">
+                        Supported formats: MP4, WebM (H.264/AAC codec).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoError(false);
+                          if (videoRef.current) {
+                            videoRef.current.load();
+                            videoRef.current.play().then(() => setIsPlayingVideo(true)).catch(() => setVideoError(true));
+                          }
+                        }}
+                        className="mt-3 px-3 py-1 rounded bg-[#2563EB] text-[11px] text-white font-medium hover:bg-[#1D4ED8]"
+                      >
+                        Retry Playback
+                      </button>
                     </div>
+                  ) : (
+                    <>
+                      <video
+                        ref={videoRef}
+                        src={currentMedia.url}
+                        poster={currentMedia.poster || project.coverImage}
+                        className={`h-full w-full ${
+                          currentMedia.fit === 'contain' || isLetterboxed
+                            ? 'object-contain max-h-full'
+                            : 'object-cover'
+                        } ${getFocalClass(currentMedia.focalPoint)}`}
+                        muted={isMuted}
+                        playsInline
+                        onTimeUpdate={handleTimeUpdate}
+                        onEnded={() => {
+                          setIsPlayingVideo(false);
+                          setVideoProgress(100);
+                        }}
+                        onError={() => setVideoError(true)}
+                        onClick={toggleVideoPlayback}
+                      />
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (videoRef.current) {
-                          videoRef.current.muted = !isMuted;
-                          setIsMuted(!isMuted);
-                        }
-                      }}
-                      className="text-white hover:text-[#38BDF8] transition"
-                    >
-                      {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-                    </button>
-                  </div>
+                      {/* Big Center Play/Pause Overlay */}
+                      {!isPlayingVideo && (
+                        <button
+                          type="button"
+                          onClick={toggleVideoPlayback}
+                          aria-label="Play video (Space / K)"
+                          className="absolute inset-0 m-auto size-16 rounded-full bg-black/60 border border-white/30 backdrop-blur-sm flex items-center justify-center hover:bg-[#2563EB] hover:border-[#2563EB] transition-all cursor-pointer group/play shadow-2xl z-20"
+                        >
+                          <Play className="size-7 fill-white text-white ml-1 transition-transform group-hover/play:scale-110" />
+                        </button>
+                      )}
+
+                      {/* Interactive Video Playbar Controls */}
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 flex items-center gap-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <button
+                          type="button"
+                          onClick={toggleVideoPlayback}
+                          aria-label={isPlayingVideo ? 'Pause' : 'Play'}
+                          className="text-white hover:text-[#38BDF8] transition"
+                        >
+                          {isPlayingVideo ? <Pause className="size-4" /> : <Play className="size-4" />}
+                        </button>
+
+                        {/* Progress Bar */}
+                        <div
+                          onClick={handleScrub}
+                          className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
+                        >
+                          <div
+                            className="h-full bg-[#2563EB] transition-all"
+                            style={{ width: `${videoProgress}%` }}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (videoRef.current) {
+                              videoRef.current.muted = !isMuted;
+                              setIsMuted(!isMuted);
+                            }
+                          }}
+                          aria-label={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                          className="text-white hover:text-[#38BDF8] transition"
+                        >
+                          {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 /* Static Image with Full Aspect Ratio & Focal Preservation */
@@ -285,8 +384,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <img
                     src={currentMedia.url}
                     alt={`${project.title} asset 0${activeMediaIndex + 1}`}
+                    onError={handleImageError}
                     className={`h-full w-full select-none ${
-                      currentMedia.fit === 'contain' || isPortrait
+                      currentMedia.fit === 'contain' || isLetterboxed
                         ? 'object-contain max-h-full'
                         : 'object-cover'
                     } ${getFocalClass(currentMedia.focalPoint)}`}
@@ -300,7 +400,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <button
                     type="button"
                     onClick={handlePrevMedia}
-                    aria-label="Previous gallery asset"
+                    aria-label="Previous gallery asset (Left Arrow)"
                     className="absolute left-3 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
                   >
                     <ChevronLeft className="size-4" />
@@ -308,7 +408,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <button
                     type="button"
                     onClick={handleNextMedia}
-                    aria-label="Next gallery asset"
+                    aria-label="Next gallery asset (Right Arrow)"
                     className="absolute right-3 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
                   >
                     <ChevronRight className="size-4" />
@@ -350,6 +450,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     <img
                       src={thumb.url}
                       alt={`Thumbnail 0${idx + 1}`}
+                      onError={handleImageError}
                       className="h-full w-full object-cover"
                     />
                     {thumb.type === 'video' && (

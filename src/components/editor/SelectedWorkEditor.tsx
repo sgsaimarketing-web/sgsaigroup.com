@@ -31,6 +31,8 @@ export const SelectedWorkEditor: React.FC = () => {
     siteData.workCategories[0]?.id || 'brand-campaigns'
   );
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editorNotice, setEditorNotice] = useState<string | null>(null);
 
   const filteredProjects = siteData.caseStudies.filter((p) => p.categoryId === activeCatId);
   const activeProject = siteData.caseStudies.find((p) => p.id === selectedProjectId);
@@ -68,14 +70,16 @@ export const SelectedWorkEditor: React.FC = () => {
       caption: `New Media Item ${current.length + 1}`,
     };
     updateGallery(project, [...current, newItem]);
+    setEditorNotice(null);
   };
 
   const removeGalleryItem = (project: CaseStudy, index: number) => {
     const current = getProjectGallery(project);
     if (current.length <= 1) {
-      alert('A project must have at least one media item in its gallery.');
+      setEditorNotice('A project must have at least one media item in its gallery.');
       return;
     }
+    setEditorNotice(null);
     updateGallery(
       project,
       current.filter((_, i) => i !== index)
@@ -286,21 +290,46 @@ export const SelectedWorkEditor: React.FC = () => {
                   >
                     <Copy className="size-3.5" />
                   </button>
+
+                  {deleteConfirmId === proj.id ? (
+                    <div className="flex items-center gap-1 bg-red-950/80 border border-red-500/40 rounded px-1.5 py-0.5">
+                      <span className="text-[10px] text-red-300">Confirm?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteCaseStudy(proj.id);
+                          setDeleteConfirmId(null);
+                        }}
+                        className="text-[10px] bg-red-600 hover:bg-red-500 text-white font-bold px-1.5 py-0.5 rounded"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="text-[10px] text-white/60 hover:text-white px-1"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      title="Delete Project"
+                      onClick={() => setDeleteConfirmId(proj.id)}
+                      className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    title="Delete Project"
                     onClick={() => {
-                      if (confirm(`Delete "${proj.title}"?`)) {
-                        deleteCaseStudy(proj.id);
-                      }
+                      setSelectedProjectId(proj.id);
+                      setDeleteConfirmId(null);
+                      setEditorNotice(null);
                     }}
-                    className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProjectId(proj.id)}
                     className="flex items-center gap-1 rounded bg-[#2563EB] hover:bg-[#1D4ED8] px-2.5 py-1 text-xs font-semibold text-white ml-2"
                   >
                     Edit
@@ -454,6 +483,19 @@ export const SelectedWorkEditor: React.FC = () => {
                 Add Media Item
               </button>
             </div>
+
+            {editorNotice && (
+              <div className="rounded bg-amber-500/10 border border-amber-500/30 p-2.5 text-xs text-amber-300 flex items-center justify-between">
+                <span>{editorNotice}</span>
+                <button
+                  type="button"
+                  onClick={() => setEditorNotice(null)}
+                  className="text-amber-300 hover:text-white text-xs underline ml-2"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             <div className="space-y-4">
               {getProjectGallery(activeProject).map((item, gIdx) => (

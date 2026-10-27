@@ -25,10 +25,7 @@ export const IndustriesEditor: React.FC = () => {
   };
 
   const removeItem = (index: number) => {
-    if (industries.items.length <= 1) {
-      alert('You must have at least one industry sector.');
-      return;
-    }
+    if (industries.items.length <= 1) return;
     const items = industries.items.filter((_, i) => i !== index);
     updateIndustries({ items });
   };
@@ -168,8 +165,9 @@ export const IndustriesEditor: React.FC = () => {
                 <button
                   type="button"
                   title="Delete Track"
+                  disabled={industries.items.length <= 1}
                   onClick={() => removeItem(idx)}
-                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1"
+                  className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 ml-1 disabled:opacity-20 disabled:pointer-events-none"
                 >
                   <Trash2 className="size-3.5" />
                 </button>
