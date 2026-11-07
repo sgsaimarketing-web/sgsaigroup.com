@@ -32,9 +32,27 @@ export const EditorDrawer: React.FC<EditorDrawerProps> = ({ isOpen, onClose }) =
       className="fixed top-14 right-0 bottom-0 z-[140] w-full max-w-[460px] bg-[#101318]/98 backdrop-blur-xl border-l border-white/10 text-white shadow-2xl flex flex-col transition-all duration-300"
       aria-label="Content & Design Editor Drawer"
     >
-      {/* Drawer Top Navigation */}
-      <div className="p-3 border-b border-white/10 flex items-center justify-between shrink-0 bg-[#0F1218]">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
+      {/* Drawer Top Header & Navigation Grid */}
+      <div className="p-3 border-b border-white/10 shrink-0 bg-[#0F1218] space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="size-2 rounded-full bg-[#2563EB]" />
+            <span className="font-display font-bold text-xs uppercase tracking-wider text-white">
+              CMS Section Editor
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Collapse Editor Drawer"
+            className="p-1 rounded-md bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition cursor-pointer"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        {/* 6 Sections Clean Grid (No Scrollbar, No Overflow) */}
+        <div className="grid grid-cols-3 gap-1.5 pt-1">
           {tabs.map((t) => {
             const isActive = activeTab === t.id;
             return (
@@ -42,27 +60,18 @@ export const EditorDrawer: React.FC<EditorDrawerProps> = ({ isOpen, onClose }) =
                 key={t.id}
                 type="button"
                 onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-semibold transition cursor-pointer text-center ${
                   isActive
-                    ? 'bg-[#2563EB] text-white shadow-sm'
+                    ? 'bg-[#2563EB] text-white shadow-sm ring-1 ring-blue-400/30'
                     : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                <span className="font-mono text-[10px] opacity-75">{t.num}</span>
-                <span>{t.label}</span>
+                <span className="font-mono text-[9px] opacity-75">{t.num}</span>
+                <span className="truncate">{t.label}</span>
               </button>
             );
           })}
         </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          title="Collapse Panel"
-          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition ml-2 shrink-0"
-        >
-          <X className="size-4" />
-        </button>
       </div>
 
       {/* Active Section Editor Container with Scroll */}

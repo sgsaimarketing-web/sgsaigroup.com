@@ -70,6 +70,7 @@ export interface CaseStudy {
   tags: string[];
   hasVideo?: boolean;
   videoUrl?: string;
+  posterUrl?: string;
 }
 
 export interface WorkCategory {
@@ -340,12 +341,46 @@ export const CASE_STUDIES: CaseStudy[] = [
     subtitle:
       'A strategic campaign, content production and digital rollout to build a stronger brand presence and drive sales impact.',
     coverImage: '/assets/work/luxury-fragrance.jpg',
+    posterUrl: '/assets/work/luxury-fragrance.jpg',
+    videoUrl: '/assets/nira-loop.mp4',
     thumbnails: [
       '/assets/work/luxury-fragrance.jpg',
       '/assets/work/beauty-range.jpg',
       '/assets/who-we-are/create.jpg',
       '/assets/work/city-ooh.jpg',
       '/assets/industry-retail.jpg',
+    ],
+    gallery: [
+      {
+        id: 'fragrance-video-0',
+        url: '/assets/nira-loop.mp4',
+        type: 'video',
+        aspectRatio: '9:16',
+        fit: 'cover',
+        focalPoint: 'center',
+        caption: 'Luxury Fragrance Launch Reel',
+        poster: '/assets/work/luxury-fragrance.jpg',
+      },
+      {
+        id: 'fragrance-img-1',
+        url: '/assets/work/beauty-range.jpg',
+        type: 'image',
+        aspectRatio: '9:16',
+        fit: 'cover',
+        focalPoint: 'center',
+        caption: 'Packaging Design Study',
+        poster: '/assets/work/beauty-range.jpg',
+      },
+      {
+        id: 'fragrance-img-2',
+        url: '/assets/work/city-ooh.jpg',
+        type: 'image',
+        aspectRatio: '9:16',
+        fit: 'cover',
+        focalPoint: 'center',
+        caption: 'City OOH Billboard Display',
+        poster: '/assets/work/city-ooh.jpg',
+      },
     ],
     challenge:
       'Increase brand visibility in a competitive fragrance market and drive consumer engagement across digital and retail touchpoints.',
@@ -427,12 +462,36 @@ export const CASE_STUDIES: CaseStudy[] = [
     subtitle:
       'Studio-grade commercial video productions showcasing behind-the-scenes precision and consumer lifestyle aspiration.',
     coverImage: '/assets/work/cinema-camera.jpg',
+    posterUrl: '/assets/work/cinema-camera.jpg',
+    videoUrl: '/assets/nira-loop.mp4',
     thumbnails: [
       '/assets/work/cinema-camera.jpg',
       '/assets/work/luxury-fragrance.jpg',
       '/assets/who-we-are/create.jpg',
       '/assets/work/beauty-range.jpg',
       '/assets/who-we-are/engineer.jpg',
+    ],
+    gallery: [
+      {
+        id: 'cinema-video-0',
+        url: '/assets/nira-loop.mp4',
+        type: 'video',
+        aspectRatio: '9:16',
+        fit: 'cover',
+        focalPoint: 'center',
+        caption: 'Commercial Studio Filming Reel',
+        poster: '/assets/work/cinema-camera.jpg',
+      },
+      {
+        id: 'cinema-img-1',
+        url: '/assets/work/luxury-fragrance.jpg',
+        type: 'image',
+        aspectRatio: '9:16',
+        fit: 'cover',
+        focalPoint: 'center',
+        caption: 'Lighting & Rigging Production Study',
+        poster: '/assets/work/luxury-fragrance.jpg',
+      },
     ],
     challenge:
       'Overcoming consumer skepticism by visualizing rigorous ingredient sourcing and laboratory quality standards.',

@@ -75,29 +75,85 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     onSelectProject(currentCategoryProjects[prevIdx]);
   };
 
+  const isVideoUrl = (u?: string): boolean => {
+    if (!u) return false;
+    return (
+      u.startsWith('data:video/') ||
+      u.startsWith('blob:') ||
+      u.endsWith('.mp4') ||
+      u.endsWith('.webm') ||
+      u.includes('.mp4?') ||
+      u.includes('.webm?')
+    );
+  };
+
+  const isImageUrl = (u?: string): boolean => {
+    if (!u) return false;
+    return (
+      u.startsWith('data:image/') ||
+      u.endsWith('.jpg') ||
+      u.endsWith('.jpeg') ||
+      u.endsWith('.png') ||
+      u.endsWith('.webp') ||
+      u.endsWith('.gif') ||
+      u.includes('.jpg?') ||
+      u.includes('.jpeg?') ||
+      u.includes('.png?') ||
+      u.includes('.webp?')
+    );
+  };
+
+  const defaultVideoUrl = project?.videoUrl || (project?.hasVideo ? '/assets/nira-loop.mp4' : undefined);
+  const defaultPosterUrl =
+    project?.posterUrl && isImageUrl(project.posterUrl)
+      ? project.posterUrl
+      : isImageUrl(project?.coverImage)
+      ? (project?.coverImage || '/assets/work/luxury-fragrance.jpg')
+      : '/assets/work/luxury-fragrance.jpg';
+
   const galleryItems: GalleryMediaItem[] =
     project?.gallery && project.gallery.length > 0
-      ? project.gallery
+      ? project.gallery.map((g, i) => {
+          const isItemVideo = g.type === 'video';
+          const validVideoSrc = isVideoUrl(g.url) ? g.url : defaultVideoUrl || '/assets/nira-loop.mp4';
+          const validPosterSrc = isImageUrl(g.poster)
+            ? g.poster
+            : isImageUrl(g.url)
+            ? g.url
+            : defaultPosterUrl;
+
+          return {
+            ...g,
+            url: isItemVideo ? validVideoSrc : isImageUrl(g.url) ? g.url : defaultPosterUrl,
+            poster: validPosterSrc,
+            aspectRatio: '9:16',
+          };
+        })
       : project?.thumbnails && project.thumbnails.length > 0
-      ? project.thumbnails.map((url, i) => ({
-          id: `media-${i}`,
-          url,
-          type: project.hasVideo && i === 0 ? 'video' : 'image',
-          aspectRatio: i % 2 === 0 ? '16:9' : '4:5',
-          fit: project.coverFit || 'cover',
-          focalPoint: project.coverFocalPoint || 'center',
-          caption: `${project.title} - Asset 0${i + 1}`,
-        }))
+      ? project.thumbnails.map((url, i) => {
+          const isFirstVideo = !!project?.hasVideo && i === 0;
+          return {
+            id: `media-${i}`,
+            url: isFirstVideo ? defaultVideoUrl || '/assets/nira-loop.mp4' : url,
+            type: isFirstVideo ? 'video' : 'image',
+            aspectRatio: '9:16',
+            fit: project?.coverFit || 'cover',
+            focalPoint: project?.coverFocalPoint || 'center',
+            caption: `${project?.title || 'Project'} - Asset 0${i + 1}`,
+            poster: isImageUrl(url) ? url : defaultPosterUrl,
+          };
+        })
       : project
       ? [
           {
             id: 'fallback-media',
-            url: project.coverImage,
+            url: project.hasVideo ? defaultVideoUrl || '/assets/nira-loop.mp4' : defaultPosterUrl,
             type: project.hasVideo ? 'video' : 'image',
-            aspectRatio: '16:9',
+            aspectRatio: '9:16',
             fit: project.coverFit || 'cover',
             focalPoint: project.coverFocalPoint || 'center',
             caption: project.title,
+            poster: defaultPosterUrl,
           },
         ]
       : [];
@@ -176,6 +232,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     type: 'image',
     fit: 'cover',
     focalPoint: 'center',
+    aspectRatio: '9:16',
   };
 
   const handleTimeUpdate = () => {
@@ -191,11 +248,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     videoRef.current.currentTime = pos * (videoRef.current.duration || 1);
   };
-
-  const isPortrait =
-    currentMedia.aspectRatio === '9:16' || currentMedia.aspectRatio === '4:5';
-  const isSquare = currentMedia.aspectRatio === '1:1';
-  const isLetterboxed = isPortrait || isSquare || currentMedia.fit === 'contain';
 
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const target = e.currentTarget;
@@ -218,6 +270,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const activePoster = isImageUrl(currentMedia.poster)
+    ? currentMedia.poster
+    : isImageUrl(currentMedia.url)
+    ? currentMedia.url
+    : isImageUrl(project.posterUrl)
+    ? project.posterUrl
+    : isImageUrl(project.coverImage)
+    ? project.coverImage
+    : '/assets/work/luxury-fragrance.jpg';
+
   return (
     <div
       role="dialog"
@@ -229,14 +291,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       <div
         ref={containerRef}
         tabIndex={-1}
-        className={`relative w-full rounded-sm border border-white/10 bg-[#101318] text-white shadow-2xl transition-all focus:outline-none ${
+        className={`relative w-full rounded-2xl border border-white/10 bg-[#101318] text-white shadow-2xl transition-all focus:outline-none ${
           isFullscreen
             ? 'fixed inset-0 max-w-none max-h-none h-full w-full rounded-none overflow-y-auto'
             : 'max-w-6xl max-h-[94vh] overflow-y-auto'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Breadcrumb Bar matching Mockup */}
+        {/* Top Breadcrumb Bar */}
         <div className="flex items-center justify-between border-b border-white/[0.08] px-6 py-4 bg-[#0F1218] sticky top-0 z-30">
           <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-[#94A3B8]">
             <span className="font-bold text-white">SGS AI GROUP</span>
@@ -266,173 +328,179 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Main Grid matching Approved Mockup */}
-        <div className="grid gap-8 p-6 lg:p-8 lg:grid-cols-12">
-          {/* Left Column: Media Showcase & Mixed Aspect Ratio Viewer */}
-          <div className="lg:col-span-7 flex flex-col justify-between">
-            {/* Visual Screen Container */}
-            <div className="relative aspect-[16/10] w-full overflow-hidden rounded-sm bg-black border border-white/10 shadow-lg flex items-center justify-center group">
-              {/* Subtle Ambient Blurred Backdrop for Portrait or Letterbox Fit */}
-              {isLetterboxed && (
-                <div
-                  className="absolute inset-0 scale-125 opacity-30 blur-2xl pointer-events-none select-none bg-cover bg-center"
-                  style={{ backgroundImage: `url(${currentMedia.url})` }}
-                  aria-hidden="true"
-                />
-              )}
+        {/* Modal Main Grid */}
+        <div className="grid gap-8 p-6 lg:p-8 lg:grid-cols-12 items-start">
+          {/* Left Column: 9:16 Vertical Media Theater */}
+          <div className="lg:col-span-6 flex flex-col items-center justify-between">
+            {/* Ambient Cinema Stage for 9:16 Vertical Media */}
+            <div className="relative w-full overflow-hidden rounded-2xl bg-black border border-white/10 shadow-2xl flex items-center justify-center p-3 sm:p-4 min-h-[460px] sm:min-h-[540px]">
+              {/* Subtle Ambient Blurred Backdrop */}
+              <div
+                className="absolute inset-0 scale-150 opacity-25 blur-3xl pointer-events-none select-none bg-cover bg-center"
+                style={{ backgroundImage: `url(${activePoster})` }}
+                aria-hidden="true"
+              />
 
-              {/* Media Renderer: Video vs Image */}
-              {currentMedia.type === 'video' ? (
-                <div className="relative h-full w-full flex items-center justify-center">
-                  {videoError ? (
-                    <div className="flex flex-col items-center justify-center p-6 text-center text-[#94A3B8]">
-                      <Video className="size-10 text-white/30 mb-2" />
-                      <p className="text-xs font-semibold text-white">Video stream unavailable</p>
-                      <p className="text-[11px] text-white/50 max-w-xs mt-1">
-                        Supported formats: MP4, WebM (H.264/AAC codec).
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVideoError(false);
-                          if (videoRef.current) {
-                            videoRef.current.load();
-                            videoRef.current.play().then(() => setIsPlayingVideo(true)).catch(() => setVideoError(true));
-                          }
-                        }}
-                        className="mt-3 px-3 py-1 rounded bg-[#2563EB] text-[11px] text-white font-medium hover:bg-[#1D4ED8]"
-                      >
-                        Retry Playback
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <video
-                        ref={videoRef}
-                        src={currentMedia.url}
-                        poster={currentMedia.poster || project.coverImage}
-                        className={`h-full w-full ${
-                          currentMedia.fit === 'contain' || isLetterboxed
-                            ? 'object-contain max-h-full'
-                            : 'object-cover'
-                        } ${getFocalClass(currentMedia.focalPoint)}`}
-                        muted={isMuted}
-                        playsInline
-                        onTimeUpdate={handleTimeUpdate}
-                        onEnded={() => {
-                          setIsPlayingVideo(false);
-                          setVideoProgress(100);
-                        }}
-                        onError={() => setVideoError(true)}
-                        onClick={toggleVideoPlayback}
-                      />
-
-                      {/* Big Center Play/Pause Overlay */}
-                      {!isPlayingVideo && (
-                        <button
-                          type="button"
-                          onClick={toggleVideoPlayback}
-                          aria-label="Play video (Space / K)"
-                          className="absolute inset-0 m-auto size-16 rounded-full bg-black/60 border border-white/30 backdrop-blur-sm flex items-center justify-center hover:bg-[#2563EB] hover:border-[#2563EB] transition-all cursor-pointer group/play shadow-2xl z-20"
-                        >
-                          <Play className="size-7 fill-white text-white ml-1 transition-transform group-hover/play:scale-110" />
-                        </button>
-                      )}
-
-                      {/* Interactive Video Playbar Controls */}
-                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 flex items-center gap-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                        <button
-                          type="button"
-                          onClick={toggleVideoPlayback}
-                          aria-label={isPlayingVideo ? 'Pause' : 'Play'}
-                          className="text-white hover:text-[#38BDF8] transition"
-                        >
-                          {isPlayingVideo ? <Pause className="size-4" /> : <Play className="size-4" />}
-                        </button>
-
-                        {/* Progress Bar */}
-                        <div
-                          onClick={handleScrub}
-                          className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
-                        >
-                          <div
-                            className="h-full bg-[#2563EB] transition-all"
-                            style={{ width: `${videoProgress}%` }}
-                          />
+              {/* Centered 9:16 Mobile-First Vertical Theater Viewport */}
+              <div className="relative aspect-[9/16] w-full max-w-[340px] sm:max-w-[360px] max-h-[72vh] overflow-hidden rounded-xl bg-neutral-950 border border-white/15 shadow-2xl group/media">
+                {/* Media Renderer: Video vs Image */}
+                {currentMedia.type === 'video' ? (
+                  <div className="relative h-full w-full flex items-center justify-center bg-black">
+                    {videoError ? (
+                      <div className="flex flex-col items-center justify-center p-6 text-center text-[#94A3B8] h-full w-full bg-neutral-900">
+                        <Video className="size-10 text-white/30 mb-2" />
+                        <p className="text-xs font-semibold text-white">Video stream unavailable</p>
+                        <p className="text-[11px] text-white/50 max-w-xs mt-1">
+                          Showing 9:16 poster cover.
+                        </p>
+                        <img
+                          src={activePoster}
+                          alt="Poster cover"
+                          onError={handleImageError}
+                          className="mt-3 size-24 rounded-lg object-cover border border-white/10"
+                        />
+                        <div className="flex flex-col gap-2 mt-3 w-full max-w-[200px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVideoError(false);
+                              if (videoRef.current) {
+                                videoRef.current.src = '/assets/nira-loop.mp4';
+                                videoRef.current.load();
+                                videoRef.current.play().then(() => setIsPlayingVideo(true)).catch(() => setVideoError(true));
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-full bg-[#2563EB] text-[11px] text-white font-medium hover:bg-[#1D4ED8] cursor-pointer shadow"
+                          >
+                            Load SGS Showcase Reel
+                          </button>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (videoRef.current) {
-                              videoRef.current.muted = !isMuted;
-                              setIsMuted(!isMuted);
-                            }
-                          }}
-                          aria-label={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-                          className="text-white hover:text-[#38BDF8] transition"
-                        >
-                          {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-                        </button>
                       </div>
-                    </>
+                    ) : (
+                      <>
+                        <video
+                          ref={videoRef}
+                          src={currentMedia.url}
+                          poster={activePoster}
+                          preload="metadata"
+                          className={`h-full w-full object-cover ${getFocalClass(currentMedia.focalPoint)}`}
+                          muted={isMuted}
+                          playsInline
+                          onTimeUpdate={handleTimeUpdate}
+                          onEnded={() => {
+                            setIsPlayingVideo(false);
+                            setVideoProgress(100);
+                          }}
+                          onError={() => setVideoError(true)}
+                          onClick={toggleVideoPlayback}
+                        />
+
+                        {/* Center Play Button Overlay */}
+                        {!isPlayingVideo && (
+                          <button
+                            type="button"
+                            onClick={toggleVideoPlayback}
+                            aria-label="Play video (Space / K)"
+                            className="absolute inset-0 m-auto size-16 rounded-full bg-black/60 border border-white/40 backdrop-blur-md flex items-center justify-center hover:bg-[#2563EB] hover:border-[#2563EB] transition-all cursor-pointer group/play shadow-2xl z-20"
+                          >
+                            <Play className="size-7 fill-white text-white ml-1 transition-transform group-hover/play:scale-110" />
+                          </button>
+                        )}
+
+                        {/* Video Controls Bar */}
+                        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 flex items-center gap-3 z-20 opacity-0 group-hover/media:opacity-100 transition-opacity duration-200">
+                          <button
+                            type="button"
+                            onClick={toggleVideoPlayback}
+                            aria-label={isPlayingVideo ? 'Pause' : 'Play'}
+                            className="text-white hover:text-[#38BDF8] transition cursor-pointer"
+                          >
+                            {isPlayingVideo ? <Pause className="size-4" /> : <Play className="size-4" />}
+                          </button>
+
+                          {/* Progress Scrubber */}
+                          <div
+                            onClick={handleScrub}
+                            className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
+                          >
+                            <div
+                              className="h-full bg-[#2563EB] transition-all"
+                              style={{ width: `${videoProgress}%` }}
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (videoRef.current) {
+                                videoRef.current.muted = !isMuted;
+                                setIsMuted(!isMuted);
+                              }
+                            }}
+                            aria-label={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                            className="text-white hover:text-[#38BDF8] transition cursor-pointer"
+                          >
+                            {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  /* 9:16 Vertical Poster Visual */
+                  <div className="relative h-full w-full flex items-center justify-center bg-black">
+                    <img
+                      src={currentMedia.url}
+                      alt={`${project.title} asset 0${activeMediaIndex + 1}`}
+                      onError={handleImageError}
+                      className={`h-full w-full select-none ${
+                        currentMedia.fit === 'contain' ? 'object-contain' : 'object-cover'
+                      } ${getFocalClass(currentMedia.focalPoint)}`}
+                    />
+                  </div>
+                )}
+
+                {/* Gallery Previous / Next Overlay Controls */}
+                {galleryItems.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePrevMedia}
+                      aria-label="Previous gallery asset (Left Arrow)"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextMedia}
+                      aria-label="Next gallery asset (Right Arrow)"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
+                    >
+                      <ChevronRight className="size-4" />
+                    </button>
+                  </>
+                )}
+
+                {/* Aspect Ratio Badge & Caption */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
+                  <span className="rounded bg-black/80 px-2 py-0.5 text-[10px] font-mono text-[#38BDF8] backdrop-blur border border-white/10 uppercase">
+                    9:16 · {currentMedia.type}
+                  </span>
+                  {currentMedia.caption && (
+                    <span className="hidden sm:inline rounded bg-black/70 px-2 py-0.5 text-[10px] text-white/80 backdrop-blur truncate max-w-[140px]">
+                      {currentMedia.caption}
+                    </span>
                   )}
                 </div>
-              ) : (
-                /* Static Image with Full Aspect Ratio & Focal Preservation */
-                <div className="relative h-full w-full flex items-center justify-center">
-                  <img
-                    src={currentMedia.url}
-                    alt={`${project.title} asset 0${activeMediaIndex + 1}`}
-                    onError={handleImageError}
-                    className={`h-full w-full select-none ${
-                      currentMedia.fit === 'contain' || isLetterboxed
-                        ? 'object-contain max-h-full'
-                        : 'object-cover'
-                    } ${getFocalClass(currentMedia.focalPoint)}`}
-                  />
-                </div>
-              )}
-
-              {/* Gallery Previous / Next Overlay Controls */}
-              {galleryItems.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handlePrevMedia}
-                    aria-label="Previous gallery asset (Left Arrow)"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
-                  >
-                    <ChevronLeft className="size-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNextMedia}
-                    aria-label="Next gallery asset (Right Arrow)"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 flex size-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
-                  >
-                    <ChevronRight className="size-4" />
-                  </button>
-                </>
-              )}
-
-              {/* Aspect Ratio Badge & Caption Pill */}
-              <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
-                <span className="rounded bg-black/75 px-2 py-0.5 text-[10px] font-mono text-white/90 backdrop-blur border border-white/10 uppercase">
-                  {currentMedia.type} · {currentMedia.aspectRatio || 'original'}
-                </span>
-                {currentMedia.caption && (
-                  <span className="hidden sm:inline rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/70 backdrop-blur">
-                    {currentMedia.caption}
-                  </span>
-                )}
               </div>
             </div>
 
-            {/* Filmstrip Thumbnails with Mixed Ratio Indicators */}
-            <div className="mt-4 grid grid-cols-5 gap-2 sm:gap-3">
+            {/* 9:16 Vertical Filmstrip Thumbnails */}
+            <div className="mt-4 flex items-center gap-2 overflow-x-auto w-full pb-2 no-scrollbar justify-start sm:justify-center">
               {galleryItems.map((thumb, idx) => {
                 const isSelected = activeMediaIndex === idx;
+                const thumbImg = thumb.poster || thumb.url;
                 return (
                   <button
                     key={thumb.id || idx}
@@ -441,14 +509,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                       setActiveMediaIndex(idx);
                       setIsPlayingVideo(false);
                     }}
-                    className={`relative aspect-[16/10] overflow-hidden rounded-sm border transition-all cursor-pointer bg-black ${
+                    className={`relative aspect-[9/16] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border transition-all cursor-pointer bg-black ${
                       isSelected
-                        ? 'border-[#2563EB] ring-2 ring-[#2563EB]/40 scale-102'
-                        : 'border-white/10 opacity-70 hover:opacity-100'
+                        ? 'border-[#2563EB] ring-2 ring-[#2563EB]/50 scale-105'
+                        : 'border-white/15 opacity-60 hover:opacity-100'
                     }`}
                   >
                     <img
-                      src={thumb.url}
+                      src={thumbImg}
                       alt={`Thumbnail 0${idx + 1}`}
                       onError={handleImageError}
                       className="h-full w-full object-cover"
@@ -458,19 +526,17 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                         <Play className="size-3 fill-white text-white" />
                       </div>
                     )}
-                    {thumb.aspectRatio && (thumb.aspectRatio === '4:5' || thumb.aspectRatio === '9:16') && (
-                      <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[8px] font-mono text-[#38BDF8]">
-                        PORTRAIT
-                      </span>
-                    )}
+                    <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[7px] font-mono text-[#38BDF8]">
+                      9:16
+                    </span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Right Column: Case Study Dossier matching Mockup Bottom Half */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-6">
+          {/* Right Column: Case Study Dossier */}
+          <div className="lg:col-span-6 flex flex-col justify-between space-y-6">
             <div>
               {/* Category & Pagination Counter */}
               <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[#94A3B8]">

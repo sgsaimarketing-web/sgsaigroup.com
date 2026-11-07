@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, Phone, Mail, Calendar, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Phone, Mail, Calendar, CheckCircle2, MessageSquare, Copy, Check, ExternalLink } from 'lucide-react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { EditableBlock } from './editor/EditableBlock.tsx';
 
@@ -16,15 +16,72 @@ export const Contact: React.FC = () => {
   });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const WHATSAPP_NUMBER = '601139440907';
+  const WHATSAPP_DISPLAY = '+60 11-3944 0907';
+  const TARGET_EMAIL = 'sgsaimarketing@gmail.com';
+
+  const generateWhatsAppMessage = () => {
+    return (
+      `*New SGS AI Group Project Inquiry*\n\n` +
+      `*Client Name:* ${formData.name}\n` +
+      `*Business Email:* ${formData.email}\n` +
+      `*Strategic Objective:* ${formData.service}\n\n` +
+      `*Project Overview & Brief:*\n${formData.message.trim() || 'Ready to discuss strategic collaboration and marketing/AI objectives.'}`
+    );
+  };
+
+  const generateWhatsAppUrl = () => {
+    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(generateWhatsAppMessage())}`;
+  };
+
+  const generateMailtoUrl = () => {
+    const subject = `SGS AI Group Inquiry — ${formData.service} (${formData.name})`;
+    const body =
+      `Dear SGS AI Group Team,\n\n` +
+      `I would like to initiate a strategic discussion regarding our marketing and AI engineering objectives.\n\n` +
+      `• Client Name: ${formData.name}\n` +
+      `• Business Email: ${formData.email}\n` +
+      `• Strategic Objective: ${formData.service}\n\n` +
+      `Project Brief & Requirements:\n` +
+      `${formData.message.trim() || 'Ready to discuss strategic collaboration and marketing/AI objectives.'}\n\n` +
+      `Best regards,\n${formData.name}`;
+    return `mailto:${TARGET_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.email) return;
     setLoading(true);
+
+    const waUrl = generateWhatsAppUrl();
+    const mailUrl = generateMailtoUrl();
+
+    // Trigger WhatsApp in new window/tab
+    try {
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    } catch {
+      // Handled in confirmation UI
+    }
+
+    // Trigger mailto protocol shortly after
     setTimeout(() => {
+      try {
+        window.location.href = mailUrl;
+      } catch {
+        // Fallback provided in UI
+      }
       setLoading(false);
       setSubmitted(true);
-    }, 600);
+    }, 450);
+  };
+
+  const handleCopyBrief = () => {
+    const text = generateWhatsAppMessage();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   return (
@@ -105,23 +162,62 @@ export const Contact: React.FC = () => {
               </p>
 
               {submitted ? (
-                <div className="mt-8 p-6 rounded-sm bg-emerald-50 border border-emerald-200 text-emerald-900 animate-in fade-in">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="size-6 text-emerald-600 shrink-0" />
-                    <p className="font-display font-bold text-base">
-                      Enquiry Received
-                    </p>
+                <div className="mt-8 p-6 sm:p-8 rounded-sm bg-[#F0FDF4] border border-emerald-300 text-emerald-950 animate-in fade-in space-y-5">
+                  <div className="flex items-start gap-3.5">
+                    <CheckCircle2 className="size-7 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-display font-extrabold text-lg text-emerald-950">
+                        Inquiry Prepared & Dispatched
+                      </h4>
+                      <p className="mt-1 text-xs leading-relaxed text-emerald-800">
+                        Thank you, <strong className="font-semibold text-emerald-950">{formData.name}</strong>. Your project brief for <strong className="font-semibold text-emerald-950">{formData.service}</strong> is routed directly to WhatsApp (<strong className="font-semibold text-emerald-950">{WHATSAPP_DISPLAY}</strong>) and our executive email (<strong className="font-semibold text-emerald-950">{TARGET_EMAIL}</strong>).
+                      </p>
+                    </div>
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-emerald-700">
-                    Thank you, {formData.name}. Executive Director TK and our client solutions team will review your project brief and get in touch shortly via {formData.email}.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setSubmitted(false)}
-                    className="mt-4 text-xs font-semibold text-emerald-800 underline hover:text-emerald-950 cursor-pointer"
-                  >
-                    Send another message
-                  </button>
+
+                  {/* Direct Action Buttons */}
+                  <div className="pt-2 space-y-2.5">
+                    <a
+                      href={generateWhatsAppUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 rounded-full bg-[#16A34A] hover:bg-[#15803D] px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-md transition-all cursor-pointer"
+                    >
+                      <MessageSquare className="size-4" />
+                      <span>Open WhatsApp Chat ({WHATSAPP_DISPLAY})</span>
+                      <ExternalLink className="size-3.5 opacity-80" />
+                    </a>
+
+                    <a
+                      href={generateMailtoUrl()}
+                      className="w-full flex items-center justify-center gap-2 rounded-full bg-white hover:bg-emerald-50 border border-emerald-300 px-5 py-3 text-xs font-bold uppercase tracking-wider text-emerald-900 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Mail className="size-4 text-emerald-700" />
+                      <span>Send Direct Email ({TARGET_EMAIL})</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyBrief}
+                      className="w-full flex items-center justify-center gap-2 rounded-full bg-black/5 hover:bg-black/10 px-4 py-2.5 text-xs font-medium text-emerald-900 transition-colors cursor-pointer"
+                    >
+                      {copied ? <Check className="size-3.5 text-emerald-700" /> : <Copy className="size-3.5" />}
+                      <span>{copied ? 'Brief Copied to Clipboard!' : 'Copy Formatted Brief Text'}</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-emerald-200/80 flex items-center justify-between text-xs">
+                    <span className="text-[11px] text-emerald-800">
+                      Response timeline: within 2–4 business hours
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSubmitted(false)}
+                      className="font-bold text-emerald-900 underline hover:text-emerald-700 cursor-pointer"
+                    >
+                      Send another inquiry
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="mt-6 space-y-4">

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Upload, Image, Video, Check, RefreshCw, Eye } from 'lucide-react';
-import { GalleryMediaItem } from '../../data/siteContent.ts';
+import { Upload, Image, Video, Check, RefreshCw, Eye, Sparkles, AlertCircle } from 'lucide-react';
+import { processMediaUpload, CompressionResult } from '../../utils/mediaCompressor.ts';
 
 interface MediaControlProps {
   label: string;
@@ -10,6 +10,8 @@ interface MediaControlProps {
   focalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
   aspectRatio?: '16:9' | '9:16' | '4:5' | '1:1' | '3:2' | 'auto';
   caption?: string;
+  posterUrl?: string;
+  onPosterChange?: (poster: string) => void;
   onChange: (patch: {
     url?: string;
     type?: 'image' | 'video';
@@ -46,38 +48,59 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   focalPoint = 'center',
   aspectRatio = 'auto',
   caption,
+  posterUrl,
+  onPosterChange,
   onChange,
   allowVideo = true,
 }) => {
   const [showPresets, setShowPresets] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [isPosterCompressing, setIsPosterCompressing] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [previewAspect, setPreviewAspect] = useState<'current' | 'portrait' | 'landscape'>('current');
+  const [compressionBadge, setCompressionBadge] = useState<string | null>(null);
+  const [previewAspect, setPreviewAspect] = useState<'current' | '9:16' | 'landscape'>('current');
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Detect genuine media type (avoid rendering a base64 image inside a <video> element)
+  const isImageSrc = url.startsWith('data:image/') || url.endsWith('.png') || url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.webp');
+  const isVideoSrc = url.startsWith('data:video/') || url.endsWith('.mp4') || url.endsWith('.webm');
+  const resolvedMediaType = isImageSrc ? 'image' : isVideoSrc ? 'video' : mediaType;
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsUploading(true);
+    setIsCompressing(true);
     setUploadError(null);
-    const isVideo = file.type.startsWith('video/');
-    const reader = new FileReader();
+    setCompressionBadge(null);
 
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
+    try {
+      const result: CompressionResult = await processMediaUpload(file, 1600, 1600, 0.82);
+
+      // Auto-update with compressed data and matching media type
       onChange({
-        url: dataUrl,
-        type: isVideo ? 'video' : 'image',
+        url: result.dataUrl,
+        type: result.type,
       });
-      setIsUploading(false);
-    };
 
-    reader.onerror = () => {
-      setUploadError('Failed to read file. Please try another image or video format.');
-      setIsUploading(false);
-    };
-
-    reader.readAsDataURL(file);
+      if (result.type === 'image') {
+        const savedPercent = Math.round(
+          ((result.originalSizeKb - result.compressedSizeKb) / Math.max(1, result.originalSizeKb)) * 100
+        );
+        setCompressionBadge(
+          savedPercent > 0
+            ? `${result.originalSizeKb}KB → ${result.compressedSizeKb}KB (-${savedPercent}% WebP)`
+            : `${result.compressedSizeKb}KB (WebP)`
+        );
+      } else {
+        setCompressionBadge(`${result.compressedSizeKb}KB (${result.format})`);
+      }
+    } catch (err: any) {
+      setUploadError(err?.message || 'Failed to process media upload.');
+    } finally {
+      setIsCompressing(false);
+      // Reset input element value so the same file can be re-uploaded if desired
+      e.target.value = '';
+    }
   };
 
   const getFocalClass = (f: string) => {
@@ -95,22 +118,40 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     }
   };
 
+  const handlePosterUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onPosterChange) return;
+
+    setIsPosterCompressing(true);
+    setUploadError(null);
+
+    try {
+      const result: CompressionResult = await processMediaUpload(file, 1080, 1920, 0.82);
+      onPosterChange(result.dataUrl);
+    } catch (err: any) {
+      setUploadError(err?.message || 'Failed to process 9:16 poster cover upload.');
+    } finally {
+      setIsPosterCompressing(false);
+      e.target.value = '';
+    }
+  };
+
   const getAspectPreviewClass = () => {
-    if (previewAspect === 'portrait') return 'aspect-[4/5] max-w-[200px]';
+    if (previewAspect === '9:16') return 'aspect-[9/16] max-w-[170px]';
     if (previewAspect === 'landscape') return 'aspect-[16/9] w-full';
     switch (aspectRatio) {
       case '9:16':
-        return 'aspect-[9/16] max-w-[180px]';
+        return 'aspect-[9/16] max-w-[170px]';
       case '4:5':
-        return 'aspect-[4/5] max-w-[200px]';
+        return 'aspect-[4/5] max-w-[190px]';
       case '1:1':
-        return 'aspect-square max-w-[220px]';
+        return 'aspect-square max-w-[210px]';
       case '3:2':
         return 'aspect-[3/2] w-full';
       case '16:9':
         return 'aspect-[16/9] w-full';
       default:
-        return 'aspect-[16/10] w-full';
+        return 'aspect-[9/16] max-w-[170px]';
     }
   };
 
@@ -118,21 +159,30 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     <div className="rounded-xl border border-white/10 bg-[#161B22] p-4 text-xs text-white/90">
       <div className="flex items-center justify-between mb-3">
         <label className="font-semibold text-white tracking-wide flex items-center gap-2">
-          {mediaType === 'video' ? (
+          {resolvedMediaType === 'video' ? (
             <Video className="size-4 text-[#2563EB]" />
           ) : (
             <Image className="size-4 text-[#2563EB]" />
           )}
           {label}
         </label>
-        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/5 text-[#94A3B8]">
-          {mediaType} · {aspectRatio}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {compressionBadge && (
+            <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              <Sparkles className="size-2.5" />
+              {compressionBadge}
+            </span>
+          )}
+          <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/5 text-[#94A3B8]">
+            {resolvedMediaType} · {aspectRatio}
+          </span>
+        </div>
       </div>
 
       {uploadError && (
-        <div className="mb-3 rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300">
-          {uploadError}
+        <div className="mb-3 rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300 flex items-start gap-2">
+          <AlertCircle className="size-4 shrink-0 text-red-400 mt-0.5" />
+          <span>{uploadError}</span>
         </div>
       )}
 
@@ -140,9 +190,10 @@ export const MediaControl: React.FC<MediaControlProps> = ({
       <div className="relative mb-3 flex flex-col items-center justify-center rounded-lg border border-white/10 bg-black/40 p-2 overflow-hidden">
         <div className={`relative overflow-hidden rounded bg-black/60 shadow-inner ${getAspectPreviewClass()} transition-all duration-300`}>
           {url ? (
-            mediaType === 'video' ? (
+            resolvedMediaType === 'video' ? (
               <video
                 src={url}
+                poster={posterUrl || '/assets/work/luxury-fragrance.jpg'}
                 className={`h-full w-full ${fit === 'contain' ? 'object-contain' : 'object-cover'} ${getFocalClass(
                   focalPoint
                 )}`}
@@ -174,27 +225,27 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
         {/* Aspect Ratio Test Toggles */}
         <div className="mt-2 flex items-center gap-1.5 text-[10px]">
-          <span className="text-white/40">Test Ratio:</span>
+          <span className="text-white/40">Test View:</span>
           <button
             type="button"
             onClick={() => setPreviewAspect('current')}
-            className={`px-1.5 py-0.5 rounded ${previewAspect === 'current' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
+            className={`px-1.5 py-0.5 rounded cursor-pointer ${previewAspect === 'current' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
           >
             Configured
           </button>
           <button
             type="button"
-            onClick={() => setPreviewAspect('landscape')}
-            className={`px-1.5 py-0.5 rounded ${previewAspect === 'landscape' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
+            onClick={() => setPreviewAspect('9:16')}
+            className={`px-1.5 py-0.5 rounded cursor-pointer ${previewAspect === '9:16' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
           >
-            16:9 Landscape
+            9:16 Vertical
           </button>
           <button
             type="button"
-            onClick={() => setPreviewAspect('portrait')}
-            className={`px-1.5 py-0.5 rounded ${previewAspect === 'portrait' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
+            onClick={() => setPreviewAspect('landscape')}
+            className={`px-1.5 py-0.5 rounded cursor-pointer ${previewAspect === 'landscape' ? 'bg-[#2563EB] text-white' : 'bg-white/5 text-white/60 hover:text-white'}`}
           >
-            4:5 Portrait
+            16:9 Landscape
           </button>
         </div>
       </div>
@@ -205,15 +256,24 @@ export const MediaControl: React.FC<MediaControlProps> = ({
           <input
             type="text"
             value={url}
-            onChange={(e) => onChange({ url: e.target.value })}
+            onChange={(e) => {
+              const val = e.target.value;
+              const isImg = val.startsWith('data:image/') || val.endsWith('.png') || val.endsWith('.jpg') || val.endsWith('.webp');
+              const isVid = val.startsWith('data:video/') || val.endsWith('.mp4') || val.endsWith('.webm');
+              onChange({
+                url: val,
+                type: isImg ? 'image' : isVid ? 'video' : mediaType,
+              });
+            }}
             placeholder="Asset path or URL (e.g. /assets/work/photo.jpg)"
             className="flex-1 rounded-lg border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white placeholder-white/30 focus:border-[#2563EB] focus:outline-none"
           />
-          <label className="cursor-pointer flex items-center gap-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition">
-            <Upload className="size-3.5" />
-            <span>{isUploading ? 'Loading...' : 'Upload'}</span>
+          <label className={`cursor-pointer flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition ${isCompressing ? 'bg-blue-700 opacity-80 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
+            {isCompressing ? <RefreshCw className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+            <span>{isCompressing ? 'Compressing...' : 'Upload'}</span>
             <input
               type="file"
+              disabled={isCompressing}
               accept={allowVideo ? 'image/jpeg,image/png,image/webp,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp'}
               onChange={handleFileUpload}
               className="sr-only"
@@ -221,29 +281,61 @@ export const MediaControl: React.FC<MediaControlProps> = ({
           </label>
         </div>
 
+        {/* Dedicated 9:16 Poster Cover input for Video to prevent black screen */}
+        {resolvedMediaType === 'video' && onPosterChange && (
+          <div className="rounded-lg border border-[#2563EB]/30 bg-[#2563EB]/10 p-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-semibold text-white text-[11px] flex items-center gap-1.5">
+                <Image className="size-3 text-[#38BDF8]" />
+                9:16 Video Poster Cover (Auto-Compressor)
+              </span>
+              <span className="text-[10px] text-[#38BDF8] font-mono">Prevents Black Screens</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={posterUrl || ''}
+                onChange={(e) => onPosterChange(e.target.value)}
+                placeholder="Poster image URL (e.g. /assets/work/luxury-fragrance.jpg)"
+                className="flex-1 rounded border border-white/10 bg-black/60 px-2.5 py-1 text-xs text-white focus:outline-none"
+              />
+              <label className={`cursor-pointer flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold text-white transition ${isPosterCompressing ? 'bg-blue-800 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
+                {isPosterCompressing ? <RefreshCw className="size-3 animate-spin" /> : <Upload className="size-3" />}
+                <span>{isPosterCompressing ? 'Compressing...' : 'Upload 9:16'}</span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePosterUpload}
+                  className="sr-only"
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Preset Library Toggle */}
         <div className="flex items-center justify-between text-[11px]">
           <button
             type="button"
             onClick={() => setShowPresets(!showPresets)}
-            className="text-[#38BDF8] hover:underline flex items-center gap-1"
+            className="text-[#38BDF8] hover:underline flex items-center gap-1 cursor-pointer"
           >
             <span>{showPresets ? 'Hide SGS Asset Library' : 'Choose from SGS Asset Library'}</span>
           </button>
           {allowVideo && (
             <div className="flex items-center gap-1">
-              <span className="text-white/40">Type:</span>
+              <span className="text-white/40">Format:</span>
               <button
                 type="button"
                 onClick={() => onChange({ type: 'image' })}
-                className={`px-2 py-0.5 rounded ${mediaType === 'image' ? 'bg-white/20 text-white font-bold' : 'text-white/50'}`}
+                className={`px-2 py-0.5 rounded cursor-pointer ${resolvedMediaType === 'image' ? 'bg-white/20 text-white font-bold' : 'text-white/50 hover:text-white'}`}
               >
                 Image
               </button>
               <button
                 type="button"
                 onClick={() => onChange({ type: 'video' })}
-                className={`px-2 py-0.5 rounded ${mediaType === 'video' ? 'bg-[#2563EB] text-white font-bold' : 'text-white/50'}`}
+                className={`px-2 py-0.5 rounded cursor-pointer ${resolvedMediaType === 'video' ? 'bg-[#2563EB] text-white font-bold' : 'text-white/50 hover:text-white'}`}
               >
                 Video
               </button>
@@ -253,7 +345,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
         {/* Preset Asset Picker */}
         {showPresets && (
-          <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto rounded-lg border border-white/10 bg-black/70 p-2">
+          <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto rounded-lg border border-white/10 bg-black/70 p-2 no-scrollbar">
             {PRESET_ASSETS.map((asset) => (
               <button
                 key={asset.url}
@@ -262,7 +354,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
                   onChange({ url: asset.url, type: asset.type as any });
                   setShowPresets(false);
                 }}
-                className={`flex items-center gap-1.5 text-left p-1 rounded hover:bg-white/10 transition ${url === asset.url ? 'bg-[#2563EB]/30 border border-[#2563EB]/40' : ''}`}
+                className={`flex items-center gap-1.5 text-left p-1 rounded hover:bg-white/10 transition cursor-pointer ${url === asset.url ? 'bg-[#2563EB]/30 border border-[#2563EB]/40' : ''}`}
               >
                 <img src={asset.url} alt="" className="size-6 rounded object-cover" />
                 <span className="truncate text-[10px] text-white/90">{asset.label}</span>
@@ -329,8 +421,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
             type="text"
             value={caption}
             onChange={(e) => onChange({ caption: e.target.value })}
-            placeholder="e.g. Studio Campaign Shoot - 01"
-            className="w-full rounded border border-white/10 bg-black/50 px-2.5 py-1 text-xs text-white placeholder-white/30 focus:border-[#2563EB] focus:outline-none"
+            placeholder="e.g. Campaign packaging visual study"
+            className="w-full rounded bg-black/50 border border-white/10 px-2.5 py-1 text-xs text-white focus:outline-none"
           />
         </div>
       )}

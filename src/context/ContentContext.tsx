@@ -20,6 +20,12 @@ import {
   ContactContent,
 } from '../data/siteContent.ts';
 import { SiteData, generateSiteContentTs } from '../data/contentSerializer.ts';
+import {
+  saveToIndexedDB,
+  loadFromIndexedDB,
+  removeFromIndexedDB,
+  safeSetLocalStorage,
+} from '../utils/draftStorage.ts';
 
 const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v2';
 const AUTH_STORAGE_KEY = 'sgs_editor_authorized_v2';
@@ -158,18 +164,37 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [siteData]);
 
+  // Asynchronous IndexedDB hydration on mount for rich drafts exceeding localStorage quota
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY).then((idbDraft) => {
+      if (idbDraft && idbDraft.caseStudies) {
+        setSiteDataState((current) => ({
+          ...DEFAULT_SITE_DATA,
+          ...current,
+          ...idbDraft,
+          config: { ...DEFAULT_SITE_DATA.config, ...(idbDraft.config || {}) },
+          hero: { ...DEFAULT_SITE_DATA.hero, ...(idbDraft.hero || {}) },
+          whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(idbDraft.whoWeAre || {}) },
+          industries: { ...DEFAULT_SITE_DATA.industries, ...(idbDraft.industries || {}) },
+          expertise: { ...DEFAULT_SITE_DATA.expertise, ...(idbDraft.expertise || {}) },
+          contact: { ...DEFAULT_SITE_DATA.contact, ...(idbDraft.contact || {}) },
+          workCategories: idbDraft.workCategories || DEFAULT_SITE_DATA.workCategories,
+          caseStudies: idbDraft.caseStudies || DEFAULT_SITE_DATA.caseStudies,
+        }));
+      }
+    });
+  }, []);
+
   // Keep state with history tracking
   const pushState = useCallback(
     (newState: SiteData) => {
       setUndoStack((prev) => [...prev.slice(-25), siteData]);
       setRedoStack([]);
       setSiteDataState(newState);
-      // Auto-save draft locally for safety
-      try {
-        localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(newState));
-      } catch (err) {
-        console.warn('Could not auto-save to localStorage:', err);
-      }
+      // Dual-tier persistence: IndexedDB (unlimited) + localStorage (safe cache)
+      saveToIndexedDB(DRAFT_STORAGE_KEY, newState);
+      safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(newState));
     },
     [siteData]
   );
@@ -180,9 +205,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setUndoStack((prev) => prev.slice(0, prev.length - 1));
     setRedoStack((prev) => [...prev, siteData]);
     setSiteDataState(previous);
-    try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(previous));
-    } catch {}
+    saveToIndexedDB(DRAFT_STORAGE_KEY, previous);
+    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(previous));
   }, [undoStack, siteData]);
 
   const redo = useCallback(() => {
@@ -191,9 +215,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setRedoStack((prev) => prev.slice(0, prev.length - 1));
     setUndoStack((prev) => [...prev, siteData]);
     setSiteDataState(next);
-    try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(next));
-    } catch {}
+    saveToIndexedDB(DRAFT_STORAGE_KEY, next);
+    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(next));
   }, [redoStack, siteData]);
 
   // Authorization helper
@@ -328,22 +351,27 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const saveDraft = useCallback(() => {
-    try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(siteData));
-    } catch (e) {
-      console.error('Failed to save draft:', e);
-    }
+    // 1. Always save to IndexedDB (virtually unlimited capacity, zero QuotaExceededError)
+    saveToIndexedDB(DRAFT_STORAGE_KEY, siteData);
+    // 2. Safely attempt localStorage cache without throwing QuotaExceededError
+    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(siteData));
   }, [siteData]);
 
   const resetToDefaults = useCallback(() => {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    removeFromIndexedDB(DRAFT_STORAGE_KEY);
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {}
     setUndoStack((prev) => [...prev, siteData]);
     setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
   }, [siteData]);
 
   const discardDraft = useCallback(() => {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    removeFromIndexedDB(DRAFT_STORAGE_KEY);
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {}
     setSiteDataState(DEFAULT_SITE_DATA);
   }, []);
 
