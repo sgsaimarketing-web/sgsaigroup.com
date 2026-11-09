@@ -24,6 +24,9 @@ import {
   saveToIndexedDB,
   loadFromIndexedDB,
   removeFromIndexedDB,
+  saveVideoBlob,
+  loadVideoBlob,
+  deleteVideoBlob,
   safeSetLocalStorage,
 } from '../utils/draftStorage.ts';
 
@@ -41,6 +44,29 @@ export const DEFAULT_SITE_DATA: SiteData = {
   caseStudies: CASE_STUDIES,
   contact: CONTACT_CONTENT,
 };
+
+export function sanitizeCaseStudies(studies: CaseStudy[]): CaseStudy[] {
+  return studies.map((p) => {
+    if (p.hasVideo) {
+      const isVid = (u?: string) =>
+        !!u && (u.endsWith('.mp4') || u.endsWith('.webm') || u.startsWith('blob:') || u.startsWith('data:video/') || u.startsWith('/assets/'));
+      const isImg = (u?: string) =>
+        !!u && (u.endsWith('.jpg') || u.endsWith('.png') || u.endsWith('.jpeg') || u.endsWith('.webp') || u.startsWith('data:image/') || u.startsWith('/assets/'));
+
+      const validVideoUrl = isVid(p.videoUrl) ? p.videoUrl : '/assets/nira-loop.mp4';
+      const validCover = isImg(p.coverImage) ? p.coverImage : (isImg(p.posterUrl) ? p.posterUrl! : '/assets/work/nelson-trading.png');
+      const validPoster = isImg(p.posterUrl) ? p.posterUrl : validCover;
+
+      return {
+        ...p,
+        videoUrl: validVideoUrl,
+        coverImage: validCover,
+        posterUrl: validPoster,
+      };
+    }
+    return p;
+  });
+}
 
 export type EditorTab =
   | 'hero'
@@ -99,6 +125,7 @@ interface ContentContextType {
   exportJsonCode: () => string;
   importJsonCode: (jsonStr: string) => { success: boolean; error?: string };
   publishToCodebase: () => Promise<{ success: boolean; message: string; bytes?: number }>;
+  saveProjectVideoBlob: (projectId: string, blob: Blob) => Promise<string>;
 }
 
 const ContentContext = createContext<ContentContextType | null>(null);
@@ -134,7 +161,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
           expertise: { ...DEFAULT_SITE_DATA.expertise, ...(parsed.expertise || {}) },
           contact: { ...DEFAULT_SITE_DATA.contact, ...(parsed.contact || {}) },
           workCategories: parsed.workCategories || DEFAULT_SITE_DATA.workCategories,
-          caseStudies: parsed.caseStudies || DEFAULT_SITE_DATA.caseStudies,
+          caseStudies: sanitizeCaseStudies(parsed.caseStudies || DEFAULT_SITE_DATA.caseStudies),
         };
       }
     } catch (e) {
@@ -164,23 +191,45 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [siteData]);
 
-  // Asynchronous IndexedDB hydration on mount for rich drafts exceeding localStorage quota
+  // Asynchronous IndexedDB hydration on mount for rich drafts and binary video streams
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY).then((idbDraft) => {
-      if (idbDraft && idbDraft.caseStudies) {
+    loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY).then(async (idbDraft) => {
+      const baseDraft = idbDraft && idbDraft.caseStudies ? idbDraft : null;
+      const targetStudies = baseDraft?.caseStudies || siteData.caseStudies;
+
+      // Hydrate any cached binary video blobs from IndexedDB into live object URLs
+      const hydratedStudies = await Promise.all(
+        targetStudies.map(async (study) => {
+          if (study.hasVideo && study.id) {
+            try {
+              const videoBlob = await loadVideoBlob(`video_blob_${study.id}`);
+              if (videoBlob) {
+                return {
+                  ...study,
+                  videoUrl: URL.createObjectURL(videoBlob),
+                };
+              }
+            } catch (err) {
+              console.warn('Error hydrating video blob for', study.id, err);
+            }
+          }
+          return study;
+        })
+      );
+
+      const sanitized = sanitizeCaseStudies(hydratedStudies);
+      if (baseDraft) {
         setSiteDataState((current) => ({
           ...DEFAULT_SITE_DATA,
           ...current,
-          ...idbDraft,
-          config: { ...DEFAULT_SITE_DATA.config, ...(idbDraft.config || {}) },
-          hero: { ...DEFAULT_SITE_DATA.hero, ...(idbDraft.hero || {}) },
-          whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(idbDraft.whoWeAre || {}) },
-          industries: { ...DEFAULT_SITE_DATA.industries, ...(idbDraft.industries || {}) },
-          expertise: { ...DEFAULT_SITE_DATA.expertise, ...(idbDraft.expertise || {}) },
-          contact: { ...DEFAULT_SITE_DATA.contact, ...(idbDraft.contact || {}) },
-          workCategories: idbDraft.workCategories || DEFAULT_SITE_DATA.workCategories,
-          caseStudies: idbDraft.caseStudies || DEFAULT_SITE_DATA.caseStudies,
+          ...baseDraft,
+          caseStudies: sanitized,
+        }));
+      } else {
+        setSiteDataState((current) => ({
+          ...current,
+          caseStudies: sanitized,
         }));
       }
     });
@@ -456,6 +505,19 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsClickToEditActive((prev) => !prev);
   }, []);
 
+  const saveProjectVideoBlob = useCallback(
+    async (projectId: string, blob: Blob): Promise<string> => {
+      await saveVideoBlob(`video_blob_${projectId}`, blob);
+      const liveUrl = URL.createObjectURL(blob);
+      updateSingleCaseStudy(projectId, {
+        videoUrl: liveUrl,
+        hasVideo: true,
+      });
+      return liveUrl;
+    },
+    [updateSingleCaseStudy]
+  );
+
   return (
     <ContentContext.Provider
       value={{
@@ -499,6 +561,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         exportJsonCode,
         importJsonCode,
         publishToCodebase,
+        saveProjectVideoBlob,
       }}
     >
       {children}

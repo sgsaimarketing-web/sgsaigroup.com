@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Play, Pause, Volume2, VolumeX, Maximize2 } from 'lucide-react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { CaseStudy } from '../data/siteContent.ts';
 import { EditableBlock } from './editor/EditableBlock.tsx';
@@ -17,6 +17,8 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
     workCategories[0]?.id || 'brand-campaigns'
   );
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
+  const [playingCardId, setPlayingCardId] = useState<string | null>(null);
+  const [mutedCards, setMutedCards] = useState<Record<string, boolean>>({});
   const trackRef = useRef<HTMLDivElement | null>(null);
 
   const filteredProjects = caseStudies.filter((p) => p.categoryId === activeCategory);
@@ -56,7 +58,7 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const target = e.currentTarget;
     target.onerror = null;
-    target.src = '/assets/work/luxury-fragrance.jpg';
+    target.src = '/assets/work/nelson-diamond.png';
   };
 
   const getFocalClass = (f?: string) => {
@@ -84,6 +86,19 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
     );
   };
 
+  const getVideoSrc = (project: CaseStudy): string => {
+    if (
+      project.videoUrl &&
+      (project.videoUrl.endsWith('.mp4') ||
+        project.videoUrl.endsWith('.webm') ||
+        project.videoUrl.startsWith('blob:') ||
+        project.videoUrl.startsWith('/assets/'))
+    ) {
+      return project.videoUrl;
+    }
+    return '/assets/nira-loop.mp4';
+  };
+
   const getCardPoster = (project: CaseStudy): string => {
     if (project.posterUrl && !isVideoUrl(project.posterUrl)) {
       return project.posterUrl;
@@ -91,7 +106,12 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
     if (project.coverImage && !isVideoUrl(project.coverImage)) {
       return project.coverImage;
     }
-    return '/assets/work/luxury-fragrance.jpg';
+    return '/assets/work/nelson-trading.png';
+  };
+
+  const handleToggleCardPlay = (e: React.MouseEvent, projId: string) => {
+    e.stopPropagation();
+    setPlayingCardId((prev) => (prev === projId ? null : projId));
   };
 
   return (
@@ -168,72 +188,149 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
             ref={trackRef}
             className="mt-4 flex gap-6 overflow-x-auto pb-6 pt-2 no-scrollbar scroll-smooth snap-x snap-mandatory"
           >
-            {filteredProjects.map((project, idx) => (
-              <div
-                key={project.id}
-                onClick={() => onSelectProject(project)}
-                className="group relative flex-none w-full sm:w-[calc(50%-12px)] lg:w-[calc(25%-18px)] snap-start rounded-xl bg-[#0F1218] border border-black/[0.08] shadow-sm hover:shadow-2xl transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-end aspect-[9/16]"
-              >
-                {/* 9:16 Full-bleed Vertical Poster / Cover */}
-                <div className="absolute inset-0 w-full h-full overflow-hidden bg-neutral-900">
-                  <img
-                    src={getCardPoster(project)}
-                    alt={project.title}
-                    loading="lazy"
-                    decoding="async"
-                    width={540}
-                    height={960}
-                    onError={handleImageError}
-                    className={`h-full w-full ${
-                      project.coverFit === 'contain' ? 'object-contain bg-black' : 'object-cover'
-                    } ${getFocalClass(project.coverFocalPoint)} transition-transform duration-700 ease-out group-hover:scale-105`}
-                  />
-                </div>
+            {filteredProjects.map((project, idx) => {
+              const isCardPlaying = playingCardId === project.id;
+              const isCardMuted = mutedCards[project.id] !== false;
 
-                {/* Top Overlay Meta: Index & Video Badge */}
-                <div className="absolute top-4 inset-x-4 flex items-center justify-between z-10 pointer-events-none">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-black/60 text-white/90 backdrop-blur-sm border border-white/10">
-                    {project.index || (idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`)}
-                  </span>
+              return (
+                <div
+                  key={project.id}
+                  onClick={() => onSelectProject(project)}
+                  className="group relative flex-none w-full sm:w-[calc(50%-12px)] lg:w-[calc(25%-18px)] snap-start rounded-xl bg-[#0F1218] border border-black/[0.08] shadow-sm hover:shadow-2xl transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-end aspect-[9/16]"
+                >
+                  {/* 9:16 Full-bleed Vertical Video / Poster / Cover */}
+                  <div className="absolute inset-0 w-full h-full overflow-hidden bg-neutral-900">
+                    {project.hasVideo && isCardPlaying ? (
+                      <video
+                        key={`vid-${project.id}`}
+                        src={getVideoSrc(project)}
+                        poster={getCardPoster(project)}
+                        autoPlay
+                        playsInline
+                        loop
+                        muted={isCardMuted}
+                        className={`h-full w-full ${
+                          project.coverFit === 'contain' ? 'object-contain bg-black' : 'object-cover'
+                        } ${getFocalClass(project.coverFocalPoint)}`}
+                      />
+                    ) : (
+                      <img
+                        src={getCardPoster(project)}
+                        alt={project.title}
+                        loading="lazy"
+                        decoding="async"
+                        width={540}
+                        height={960}
+                        onError={handleImageError}
+                        className={`h-full w-full ${
+                          project.coverFit === 'contain' ? 'object-contain bg-black' : 'object-cover'
+                        } ${getFocalClass(project.coverFocalPoint)} transition-transform duration-700 ease-out group-hover:scale-105`}
+                      />
+                    )}
+                  </div>
+
+                  {/* Top Overlay Meta: Index & Video Badge / Sound Control */}
+                  <div className="absolute top-4 inset-x-4 flex items-center justify-between z-20">
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-black/60 text-white/90 backdrop-blur-sm border border-white/10 pointer-events-none">
+                      {project.index || (idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`)}
+                    </span>
+
+                    {project.hasVideo && (
+                      <div className="flex items-center gap-1.5">
+                        {isCardPlaying && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMutedCards((prev) => ({ ...prev, [project.id]: !prev[project.id] }));
+                            }}
+                            aria-label={isCardMuted ? 'Unmute video audio' : 'Mute video audio'}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/70 hover:bg-black text-white backdrop-blur-sm border border-white/20 shadow text-[10px] font-mono cursor-pointer transition"
+                          >
+                            {isCardMuted ? (
+                              <>
+                                <VolumeX className="size-3 text-white/70" />
+                                <span>Muted</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="size-3 text-emerald-400" />
+                                <span>Sound On</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        <span className="flex items-center gap-1 font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-[#2563EB]/85 text-white backdrop-blur-sm border border-white/20 shadow pointer-events-none">
+                          {isCardPlaying ? (
+                            <span className="flex items-center gap-1 text-emerald-300">
+                              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              Playing
+                            </span>
+                          ) : (
+                            <>
+                              <Play className="size-2.5 fill-white" /> Video Reel
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Interactive Center Play / Pause Button for Video Projects */}
                   {project.hasVideo && (
-                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-[#2563EB]/85 text-white backdrop-blur-sm border border-white/20 shadow">
-                      <Play className="size-2.5 fill-white" /> Video Reel
-                    </span>
+                    <div className="absolute inset-0 flex items-center justify-center z-20">
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleCardPlay(e, project.id)}
+                        aria-label={isCardPlaying ? 'Pause video reel' : 'Play video reel'}
+                        className={`flex size-14 items-center justify-center rounded-full border border-white/40 shadow-2xl backdrop-blur-md transition-all duration-300 cursor-pointer ${
+                          isCardPlaying
+                            ? 'bg-black/60 hover:bg-[#2563EB] opacity-0 group-hover:opacity-100 hover:scale-110'
+                            : 'bg-[#2563EB] hover:bg-[#1D4ED8] hover:scale-110 text-white'
+                        }`}
+                      >
+                        {isCardPlaying ? (
+                          <Pause className="size-6 fill-white text-white" />
+                        ) : (
+                          <Play className="size-6 fill-white ml-0.5 text-white" />
+                        )}
+                      </button>
+                    </div>
                   )}
+
+                  {/* Bottom Scrim & Content Info Overlay */}
+                  <div className="relative z-10 p-5 bg-gradient-to-t from-black via-black/75 via-50% to-transparent pt-20 flex flex-col justify-end">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#38BDF8] pointer-events-none">
+                      <span>{project.categoryLabel}</span>
+                      <span className="text-white/40">·</span>
+                      <span className="text-white/70">{project.sector}</span>
+                    </div>
+
+                    <h3 className="mt-1.5 font-display text-lg font-bold text-white group-hover:text-[#38BDF8] transition-colors leading-snug line-clamp-2 pointer-events-none">
+                      {project.title}
+                    </h3>
+
+                    <p className="mt-1 text-xs text-white/70 line-clamp-2 leading-relaxed pointer-events-none">
+                      {project.subtitle}
+                    </p>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#38BDF8] group-hover:text-white transition-colors">
+                        <span>View Project Dossier</span>
+                        <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-1" />
+                      </div>
+
+                      {project.hasVideo && isCardPlaying && (
+                        <span className="text-[10px] text-white/60 font-mono">
+                          Tap card for dossier
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-
-                {/* Center Play Icon for Video Projects */}
-                {project.hasVideo && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                    <span className="flex size-14 items-center justify-center rounded-full bg-black/60 border border-white/40 backdrop-blur-md text-white group-hover:bg-[#2563EB] group-hover:border-[#2563EB] group-hover:scale-110 transition-all duration-300 shadow-xl">
-                      <Play className="size-6 fill-white ml-0.5" />
-                    </span>
-                  </div>
-                )}
-
-                {/* Bottom Scrim & Content Info Overlay */}
-                <div className="relative z-10 p-5 bg-gradient-to-t from-black via-black/75 via-50% to-transparent pt-20 flex flex-col justify-end pointer-events-none">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#38BDF8]">
-                    <span>{project.categoryLabel}</span>
-                    <span className="text-white/40">·</span>
-                    <span className="text-white/70">{project.sector}</span>
-                  </div>
-
-                  <h3 className="mt-1.5 font-display text-lg font-bold text-white group-hover:text-[#38BDF8] transition-colors leading-snug line-clamp-2">
-                    {project.title}
-                  </h3>
-
-                  <p className="mt-1 text-xs text-white/70 line-clamp-2 leading-relaxed">
-                    {project.subtitle}
-                  </p>
-
-                  <div className="mt-3 flex items-center gap-1.5 text-xs font-bold text-[#38BDF8] group-hover:text-white transition-colors">
-                    <span>View Project Dossier</span>
-                    <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-1" />
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

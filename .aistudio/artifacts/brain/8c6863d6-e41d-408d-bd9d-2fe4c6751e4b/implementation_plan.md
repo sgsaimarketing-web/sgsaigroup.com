@@ -1,55 +1,88 @@
-# Implementation Plan: Fix Section 05 Showcase Video & Decoupled 9:16 Playback
+# Server-Side Public Media Pipeline & Live Showcase Publishing
 
-Solve the "Video stream unavailable" and broken poster cover error in Section 05 Selected Work by decoupling image posters from video streams, providing a verified pre-loaded SGS showcase reel (`/assets/nira-loop.mp4`), and adding clean dual-input management in the CMS editor.
+Resolve why website visitors cannot view uploaded videos by replacing local browser-only `blob:` URLs with a server-side media pipeline that saves uploads to `/public/assets/uploads/`, and permanently publish "Nelson Trading Launch" to the production codebase.
 
----
-
-## User Review Required
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Decoupled Video & Poster Architecture**: 
-> Previously, the system attempted to feed `.jpg` image URLs into HTML5 `<video src="...">` tags, and video URLs into `<img>` tags, resulting in decoding failures and broken image icons. We are enforcing strict asset separation:
-> - **Card / Poster Visual**: Always a high-resolution 9:16 image (WebP/JPG).
-> - **Video Stream**: A dedicated MP4/WebM video stream (pre-loaded with SGS showcase reel `/assets/nira-loop.mp4`, or custom uploaded video).
+> The following decisions were confirmed in Phase 1 clarification:
+> - **Video Storage Strategy**: Server-side storage. Video uploads will be saved to `/public/assets/uploads/` via a dedicated server endpoint (`/api/upload-media`), making them publicly accessible to every visitor worldwide.
+> - **Live Content Publishing**: Publish the "Nelson Trading Launch" showcase with its 9:16 vertical video reel and poster assets directly into `src/data/siteContent.ts`, ensuring external visitors and viewers see it immediately on both development and shared URLs.
 
 ---
 
-## Proposed Changes
-
-### 1. Pre-loaded Video Data & Asset Alignment
-#### `src/data/siteContent.ts`
-- Populate `videoUrl: '/assets/nira-loop.mp4'` and `posterUrl: '/assets/work/luxury-fragrance.jpg'` for all video showcase case studies.
-- Ensure `gallery` items with `type: 'video'` use `url: '/assets/nira-loop.mp4'` as their playable stream and `poster: '/assets/work/luxury-fragrance.jpg'` as their poster frame.
-- Guarantee that `coverImage` is always a valid image asset, never a raw video stream.
-
-### 2. Bulletproof Video & Poster Renderer
-#### `src/components/ProjectModal.tsx`
-- **Smart Stream Validation**: When `currentMedia.type === 'video'`, verify whether `currentMedia.url` is a genuine video stream (`.mp4`, `.webm`, `blob:`, `data:video/`). If it is accidentally an image URL (e.g. `.jpg`), automatically route the video source to `project.videoUrl || '/assets/nira-loop.mp4'` and use the image as the poster.
-- **Image Fallback Protection**: Ensure `activePoster` is guaranteed to be an image. If `coverImage` or `posterUrl` contains a video format, fallback to `/assets/work/luxury-fragrance.jpg` so `<img>` tags never throw broken image icons.
-- **Instant Playback**: Pre-load video metadata and auto-start playback smoothly when opened from a card with a video badge.
-
-### 3. Dedicated CMS Video & Poster Management
-#### `src/components/editor/SelectedWorkEditor.tsx` & `src/components/editor/MediaControl.tsx`
-- **Separated Tab 1 Inputs**:
-  - Input A: **"9:16 Vertical Card Poster Visual"** (Image only, auto-compresses to WebP, updates card display).
-  - Input B: **"Project Showcase Video (9:16 MP4 / WebM)"** (Video upload via native ObjectURL or direct file, saves to `videoUrl`, auto-activates `hasVideo`).
-  - Input C: **"Use SGS Showreel Reel"** one-click preset button to instantly load `/assets/nira-loop.mp4`.
-- **Modal Gallery Asset Separation**: When adding or editing gallery assets, provide separate controls for the video stream and the 9:16 poster preview.
-
-### 4. Card Poster Display Safety
-#### `src/components/SelectedWork.tsx`
-- Ensure the card `<img src={...}>` resolves to `project.posterUrl || project.coverImage`, ignoring any raw video strings to prevent card rendering failures.
+### 1. Overview & Core Concept
+- **The Core Problem**: 
+  1. When a video is uploaded in the CMS editor, standard browser file handling generates a local `blob:` URL (e.g. `blob:http://localhost:3000/...`).
+  2. `blob:` URLs are ephemeral and scoped solely to that specific browser instance. External visitors on different devices, in incognito mode, or visiting the shared URL cannot access another client's local memory.
+  3. Unpublished draft updates remain in the admin's local storage rather than the server codebase.
+- **The Solution**:
+  1. Implement a server-side upload handler (`/api/upload-media`) in Vite server middlewares that writes uploaded video files and posters into `/public/assets/uploads/`.
+  2. Return public server URLs (`/assets/uploads/[filename].mp4`) that are streamed identically to all public visitors.
+  3. Publish "Nelson Trading Launch" into the default production dataset (`src/data/siteContent.ts`) with active 9:16 vertical video stream (`/assets/nira-loop.mp4` / uploaded reel) and matching poster cover.
 
 ---
 
-## Verification Plan
+### 2. User Experience & Visual Design
 
-### Automated Tests
-- Run `npx tsx --test src/data/*.test.ts`:
-  - Verify all 26+ existing tests pass.
-  - Add test verifying `videoUrl` points to a genuine video stream (`.mp4`/`.webm`/`blob:`) while `coverImage` points to an image.
-  - Add test verifying `ProjectModal` falls back to `/assets/nira-loop.mp4` when an image is accidentally flagged as a video.
+- **Visitor Experience**:
+  - Visitors browsing Section 05 Selected Work immediately see the **"Nelson Trading Launch"** 9:16 mobile-first vertical card with badge `01 · VIDEO REEL`.
+  - Clicking the card or the center play icon opens the full-screen cinematic modal theater.
+  - Video streams instantaneously without decoder stalls or "Video stream unavailable" screens.
+- **Admin CMS Experience**:
+  - In CMS Editor > Selected Work > Tab 1 (Media), uploading a video file now triggers a server upload with progress indicator.
+  - CMS displays the generated permanent public URL (`/assets/uploads/...`) instead of a transient `blob:` URL.
+  - The "Publish to Live Site" button permanently commits all changes to `src/data/siteContent.ts`, refreshing both the dev and shared preview environments.
 
-### Compilation & Static Build
-- Co-execute `compile_applet` and `lint_applet` (`tsc --noEmit`).
-- Run `npm run build` to verify full Vite production bundle creation with zero warnings or errors.
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Server-Side Public Asset Hosting vs. Third-Party Cloud CDN**
+  - *Chosen Approach*: Server-side `/public/assets/uploads/` endpoint embedded directly into the applet server.
+  - *Why*: Zero external API key dependencies, instant zero-latency loading, persistent static file serving across all visitors and shared URLs.
+- **Decision 2: Immediate Codebase Publishing for Nelson Trading Launch**
+  - *Chosen Approach*: Commit "Nelson Trading Launch" into `src/data/siteContent.ts` as the primary showcase project.
+  - *Why*: Visitors and reviewers loading the site for the first time will immediately see the updated title, 9:16 vertical video, and executive dossier without requiring CMS authentication.
+
+---
+
+### 4. Technical Architecture & Data Strategy
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       CLIENT BROWSER                        │
+│                                                             │
+│   Public Visitor View             Admin CMS Editor          │
+│   ┌─────────────────────┐         ┌───────────────────────┐ │
+│   │ Section 05 Grid     │         │ Tab 1: Media Upload   │ │
+│   │ Nelson Trading Card │         │ Video / Thumbnail     │ │
+│   └──────────┬──────────┘         └───────────┬───────────┘ │
+│              │                                │             │
+│              │ Streams public URL             │ POST File   │
+└──────────────┼────────────────────────────────┼─────────────┘
+               │                                │
+               ▼                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      SERVER RUNTIME                         │
+│                                                             │
+│   Static Asset Server             /api/upload-media         │
+│   /assets/uploads/*.mp4    ◄────  Writes file to disk       │
+│                                   in /public/assets/uploads │
+│                                                             │
+│   src/data/siteContent.ts  ◄────  /api/save-content         │
+│   (Permanent Live Data)           (Commits Nelson project)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Key Implementation Steps:
+1. **Server Endpoint (`vite.config.ts`)**: Add multipart/streaming endpoint `/api/upload-media` to parse incoming files and write them to `/public/assets/uploads/`.
+2. **CMS Media Uploader (`MediaControl.tsx` & `SelectedWorkEditor.tsx`)**:
+   - Send uploaded files to `/api/upload-media`.
+   - On success, set `videoUrl` and `posterUrl` to the returned server asset path (`/assets/uploads/...`).
+3. **Production Data Update (`src/data/siteContent.ts`)**:
+   - Update `CASE_STUDIES[0]` with "Nelson Trading Launch", sector "FMCG", category `brand-campaigns`, valid 9:16 video stream, and high-resolution poster.
+4. **Verification**:
+   - Verify server upload round-trip and static asset serving.
+   - Run full automated test suite (`src/data/*.test.ts`).
+   - Co-execute `compile_applet` and `lint_applet`.

@@ -12,6 +12,7 @@ interface MediaControlProps {
   caption?: string;
   posterUrl?: string;
   onPosterChange?: (poster: string) => void;
+  onVideoFileSelect?: (file: File) => void;
   onChange: (patch: {
     url?: string;
     type?: 'image' | 'video';
@@ -24,6 +25,10 @@ interface MediaControlProps {
 }
 
 const PRESET_ASSETS = [
+  { label: 'Nelson Official Video Reel', url: '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4', type: 'video' },
+  { label: 'SGS NIRA Showcase Reel', url: '/assets/nira-loop.mp4', type: 'video' },
+  { label: 'Nelson Diamond Inspection', url: '/assets/work/nelson-diamond.png', type: 'image' },
+  { label: 'Nelson Trading Cosmic', url: '/assets/work/nelson-trading.png', type: 'image' },
   { label: 'NIRA Official Hero', url: '/assets/nira-official.png', type: 'image' },
   { label: 'Connected Earth', url: '/assets/nira-connected-earth.png', type: 'image' },
   { label: 'Luxury Fragrance', url: '/assets/work/luxury-fragrance.jpg', type: 'image' },
@@ -50,11 +55,13 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   caption,
   posterUrl,
   onPosterChange,
+  onVideoFileSelect,
   onChange,
   allowVideo = true,
 }) => {
   const [showPresets, setShowPresets] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
+  const [compressingLabel, setCompressingLabel] = useState('Compressing...');
   const [isPosterCompressing, setIsPosterCompressing] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [compressionBadge, setCompressionBadge] = useState<string | null>(null);
@@ -62,7 +69,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
   // Detect genuine media type (avoid rendering a base64 image inside a <video> element)
   const isImageSrc = url.startsWith('data:image/') || url.endsWith('.png') || url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.webp');
-  const isVideoSrc = url.startsWith('data:video/') || url.endsWith('.mp4') || url.endsWith('.webm');
+  const isVideoSrc = url.startsWith('data:video/') || url.endsWith('.mp4') || url.endsWith('.webm') || url.startsWith('blob:');
   const resolvedMediaType = isImageSrc ? 'image' : isVideoSrc ? 'video' : mediaType;
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,32 +80,123 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setUploadError(null);
     setCompressionBadge(null);
 
+    // Safety timeout: Never leave UI locked in Compressing state for over 15 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsCompressing(false);
+    }, 15000);
+
     try {
-      const result: CompressionResult = await processMediaUpload(file, 1600, 1600, 0.82);
+      const isVideo =
+        file.type.startsWith('video/') ||
+        /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
 
-      // Auto-update with compressed data and matching media type
-      onChange({
-        url: result.dataUrl,
-        type: result.type,
-      });
+      if (isVideo) {
+        setCompressingLabel('Loading Video...');
+        // 1. Instantly wire up native local stream so user can preview and scrub immediately
+        const localStreamUrl = URL.createObjectURL(file);
+        onChange({
+          url: localStreamUrl,
+          type: 'video',
+        });
 
-      if (result.type === 'image') {
+        if (onVideoFileSelect) {
+          onVideoFileSelect(file);
+        }
+
+        const sizeKb = Math.round(file.size / 1024);
+        setCompressionBadge(`Local Stream Active (${sizeKb}KB) - Syncing to Server...`);
+
+        // 2. Attempt server upload in background with 12s timeout
+        setCompressingLabel('Saving to Server...');
+        try {
+          const controller = new AbortController();
+          const abortTimeout = setTimeout(() => controller.abort(), 12000);
+          const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const uploadName = `${Date.now()}-${sanitized}`;
+
+          const uploadRes = await fetch('/api/upload-media', {
+            method: 'POST',
+            headers: {
+              'x-file-name': uploadName,
+              'content-type': file.type || 'video/mp4',
+            },
+            body: file,
+            signal: controller.signal,
+          });
+          clearTimeout(abortTimeout);
+
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData.url) {
+              onChange({
+                url: uploadData.url,
+                type: 'video',
+              });
+              setCompressionBadge(`✓ Saved to Public Server (${sizeKb}KB)`);
+            }
+          } else {
+            setCompressionBadge(`✓ Local Stream & Cache Active (${sizeKb}KB)`);
+          }
+        } catch (serverErr) {
+          console.warn('Server media upload bypassed, retaining active local stream:', serverErr);
+          setCompressionBadge(`✓ Local Stream & Cache Active (${sizeKb}KB)`);
+        }
+      } else {
+        // Image processing with WebP compression
+        setCompressingLabel('Compressing WebP...');
+        const result: CompressionResult = await processMediaUpload(file, 1600, 1600, 0.82);
+
+        // Immediate responsive preview
+        onChange({
+          url: result.dataUrl,
+          type: 'image',
+        });
+
+        let finalImageUrl = result.dataUrl;
+        try {
+          const controller = new AbortController();
+          const abortTimeout = setTimeout(() => controller.abort(), 7000);
+          const imgRes = await fetch('/api/upload-media', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileName: `img-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
+              dataUrl: result.dataUrl,
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(abortTimeout);
+
+          if (imgRes.ok) {
+            const imgData = await imgRes.json();
+            if (imgData.url) {
+              finalImageUrl = imgData.url;
+              onChange({
+                url: finalImageUrl,
+                type: 'image',
+              });
+            }
+          }
+        } catch (e) {
+          // Keep compressed WebP dataUrl
+        }
+
         const savedPercent = Math.round(
           ((result.originalSizeKb - result.compressedSizeKb) / Math.max(1, result.originalSizeKb)) * 100
         );
         setCompressionBadge(
-          savedPercent > 0
-            ? `${result.originalSizeKb}KB → ${result.compressedSizeKb}KB (-${savedPercent}% WebP)`
-            : `${result.compressedSizeKb}KB (WebP)`
+          finalImageUrl && !finalImageUrl.startsWith('data:')
+            ? `✓ Public Server Asset (${result.compressedSizeKb}KB WebP)`
+            : savedPercent > 0
+            ? `✓ ${result.originalSizeKb}KB → ${result.compressedSizeKb}KB (-${savedPercent}% WebP)`
+            : `✓ ${result.compressedSizeKb}KB (WebP)`
         );
-      } else {
-        setCompressionBadge(`${result.compressedSizeKb}KB (${result.format})`);
       }
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to process media upload.');
     } finally {
+      clearTimeout(safetyTimer);
       setIsCompressing(false);
-      // Reset input element value so the same file can be re-uploaded if desired
       e.target.value = '';
     }
   };
@@ -125,12 +223,42 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setIsPosterCompressing(true);
     setUploadError(null);
 
+    const safetyTimer = setTimeout(() => {
+      setIsPosterCompressing(false);
+    }, 10000);
+
     try {
       const result: CompressionResult = await processMediaUpload(file, 1080, 1920, 0.82);
       onPosterChange(result.dataUrl);
+
+      // Upload 9:16 poster to server for permanent public display
+      try {
+        const controller = new AbortController();
+        const abortTimeout = setTimeout(() => controller.abort(), 6000);
+        const postRes = await fetch('/api/upload-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileName: `poster-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
+            dataUrl: result.dataUrl,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(abortTimeout);
+
+        if (postRes.ok) {
+          const postData = await postRes.json();
+          if (postData.url) {
+            onPosterChange(postData.url);
+          }
+        }
+      } catch (err) {
+        console.warn('Server poster upload unavailable, using optimized WebP dataUrl:', err);
+      }
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to process 9:16 poster cover upload.');
     } finally {
+      clearTimeout(safetyTimer);
       setIsPosterCompressing(false);
       e.target.value = '';
     }
@@ -268,17 +396,29 @@ export const MediaControl: React.FC<MediaControlProps> = ({
             placeholder="Asset path or URL (e.g. /assets/work/photo.jpg)"
             className="flex-1 rounded-lg border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white placeholder-white/30 focus:border-[#2563EB] focus:outline-none"
           />
-          <label className={`cursor-pointer flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition ${isCompressing ? 'bg-blue-700 opacity-80 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
-            {isCompressing ? <RefreshCw className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-            <span>{isCompressing ? 'Compressing...' : 'Upload'}</span>
-            <input
-              type="file"
-              disabled={isCompressing}
-              accept={allowVideo ? 'image/jpeg,image/png,image/webp,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp'}
-              onChange={handleFileUpload}
-              className="sr-only"
-            />
-          </label>
+          <div className="flex items-center gap-1.5">
+            <label className={`cursor-pointer flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition ${isCompressing ? 'bg-blue-700 opacity-90 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
+              {isCompressing ? <RefreshCw className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+              <span>{isCompressing ? compressingLabel : 'Upload'}</span>
+              <input
+                type="file"
+                disabled={isCompressing}
+                accept={allowVideo ? 'image/*,video/*,.mp4,.webm,.mov,.m4v,.png,.jpg,.jpeg,.webp' : 'image/*,.png,.jpg,.jpeg,.webp'}
+                onChange={handleFileUpload}
+                className="sr-only"
+              />
+            </label>
+            {isCompressing && (
+              <button
+                type="button"
+                onClick={() => setIsCompressing(false)}
+                className="text-[10px] text-white/60 hover:text-white underline cursor-pointer px-1 py-1"
+                title="Cancel or reset upload button"
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Dedicated 9:16 Poster Cover input for Video to prevent black screen */}
@@ -296,19 +436,32 @@ export const MediaControl: React.FC<MediaControlProps> = ({
                 type="text"
                 value={posterUrl || ''}
                 onChange={(e) => onPosterChange(e.target.value)}
-                placeholder="Poster image URL (e.g. /assets/work/luxury-fragrance.jpg)"
+                placeholder="Poster image URL (e.g. /assets/work/nelson-trading.png)"
                 className="flex-1 rounded border border-white/10 bg-black/60 px-2.5 py-1 text-xs text-white focus:outline-none"
               />
-              <label className={`cursor-pointer flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold text-white transition ${isPosterCompressing ? 'bg-blue-800 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
-                {isPosterCompressing ? <RefreshCw className="size-3 animate-spin" /> : <Upload className="size-3" />}
-                <span>{isPosterCompressing ? 'Compressing...' : 'Upload 9:16'}</span>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handlePosterUpload}
-                  className="sr-only"
-                />
-              </label>
+              <div className="flex items-center gap-1">
+                <label className={`cursor-pointer flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold text-white transition ${isPosterCompressing ? 'bg-blue-800 cursor-wait' : 'bg-[#2563EB] hover:bg-[#1D4ED8]'}`}>
+                  {isPosterCompressing ? <RefreshCw className="size-3 animate-spin" /> : <Upload className="size-3" />}
+                  <span>{isPosterCompressing ? 'Compressing...' : 'Upload 9:16'}</span>
+                  <input
+                    type="file"
+                    disabled={isPosterCompressing}
+                    accept="image/*,.png,.jpg,.jpeg,.webp"
+                    onChange={handlePosterUpload}
+                    className="sr-only"
+                  />
+                </label>
+                {isPosterCompressing && (
+                  <button
+                    type="button"
+                    onClick={() => setIsPosterCompressing(false)}
+                    className="text-[10px] text-white/60 hover:text-white underline cursor-pointer px-1 py-1"
+                    title="Reset poster upload button"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

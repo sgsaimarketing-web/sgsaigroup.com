@@ -7,8 +7,9 @@
  */
 
 const DB_NAME = 'SGS_CMS_DATABASE';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'site_content_store';
+const VIDEO_STORE_NAME = 'binary_video_store';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -23,6 +24,9 @@ function openDatabase(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(VIDEO_STORE_NAME)) {
+        db.createObjectStore(VIDEO_STORE_NAME);
       }
     };
 
@@ -80,6 +84,65 @@ export async function removeFromIndexedDB(key: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(key);
+
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Saves a binary video Blob to IndexedDB.
+ */
+export async function saveVideoBlob(key: string, blob: Blob): Promise<boolean> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIDEO_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(VIDEO_STORE_NAME);
+      const request = store.put(blob, key);
+
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB video blob write warning:', err);
+    return false;
+  }
+}
+
+/**
+ * Retrieves a binary video Blob from IndexedDB.
+ */
+export async function loadVideoBlob(key: string): Promise<Blob | null> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIDEO_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(VIDEO_STORE_NAME);
+      const request = store.get(key);
+
+      request.onsuccess = () => resolve((request.result as Blob) || null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB video blob read warning:', err);
+    return null;
+  }
+}
+
+/**
+ * Removes a binary video Blob from IndexedDB.
+ */
+export async function deleteVideoBlob(key: string): Promise<boolean> {
+  try {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIDEO_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(VIDEO_STORE_NAME);
       const request = store.delete(key);
 
       request.onsuccess = () => resolve(true);

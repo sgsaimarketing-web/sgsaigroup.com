@@ -50,9 +50,32 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   useEffect(() => {
     setActiveMediaIndex(0);
-    setIsPlayingVideo(false);
     setVideoProgress(0);
     setVideoError(false);
+    if (project?.hasVideo) {
+      setIsPlayingVideo(true);
+      const timer = setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current
+            .play()
+            .then(() => setIsPlayingVideo(true))
+            .catch(() => {
+              // Browser autoplay policy fallback: mute and play
+              if (videoRef.current) {
+                videoRef.current.muted = true;
+                setIsMuted(true);
+                videoRef.current
+                  .play()
+                  .then(() => setIsPlayingVideo(true))
+                  .catch(() => {});
+              }
+            });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    } else {
+      setIsPlayingVideo(false);
+    }
   }, [project]);
 
   const currentCategoryProjects = project
@@ -103,29 +126,48 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     );
   };
 
-  const defaultVideoUrl = project?.videoUrl || (project?.hasVideo ? '/assets/nira-loop.mp4' : undefined);
-  const defaultPosterUrl =
+  const defaultVideoUrl: string =
+    project?.videoUrl ||
+    (project?.hasVideo ? '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : '') ||
+    '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4';
+  const defaultPosterUrl: string =
     project?.posterUrl && isImageUrl(project.posterUrl)
       ? project.posterUrl
       : isImageUrl(project?.coverImage)
-      ? (project?.coverImage || '/assets/work/luxury-fragrance.jpg')
-      : '/assets/work/luxury-fragrance.jpg';
+      ? (project?.coverImage || '/assets/work/nelson-diamond.png')
+      : '/assets/work/nelson-diamond.png';
+
+  const getMediaDisplaySrc = (item?: GalleryMediaItem): string => {
+    if (!item) return project?.coverImage || '/assets/work/nelson-diamond.png';
+    if (item.type === 'video') {
+      if (item.poster && isImageUrl(item.poster)) return item.poster;
+      if (project?.posterUrl && isImageUrl(project.posterUrl)) return project.posterUrl;
+      if (project?.coverImage && isImageUrl(project.coverImage)) return project.coverImage;
+      return '/assets/work/nelson-diamond.png';
+    }
+    // For images, the URL is the image visual; fallback to poster or project cover
+    if (item.url && isImageUrl(item.url)) return item.url;
+    if (item.poster && isImageUrl(item.poster)) return item.poster;
+    return project?.coverImage || '/assets/work/nelson-diamond.png';
+  };
 
   const galleryItems: GalleryMediaItem[] =
     project?.gallery && project.gallery.length > 0
       ? project.gallery.map((g, i) => {
-          const isItemVideo = g.type === 'video';
-          const validVideoSrc = isVideoUrl(g.url) ? g.url : defaultVideoUrl || '/assets/nira-loop.mp4';
-          const validPosterSrc = isImageUrl(g.poster)
-            ? g.poster
-            : isImageUrl(g.url)
+          const isItemVideo = g.type === 'video' || isVideoUrl(g.url);
+          const validVideoSrc: string = (isVideoUrl(g.url) ? g.url : defaultVideoUrl) || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4';
+          const validImgSrc: string = (isImageUrl(g.url)
             ? g.url
-            : defaultPosterUrl;
+            : isImageUrl(g.poster)
+            ? g.poster
+            : defaultPosterUrl) || defaultPosterUrl;
 
           return {
             ...g,
-            url: isItemVideo ? validVideoSrc : isImageUrl(g.url) ? g.url : defaultPosterUrl,
-            poster: validPosterSrc,
+            id: g.id || `media-${i}`,
+            type: isItemVideo ? 'video' : 'image',
+            url: isItemVideo ? validVideoSrc : validImgSrc,
+            poster: isItemVideo ? (isImageUrl(g.poster) ? g.poster : defaultPosterUrl) : validImgSrc,
             aspectRatio: '9:16',
           };
         })
@@ -134,7 +176,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           const isFirstVideo = !!project?.hasVideo && i === 0;
           return {
             id: `media-${i}`,
-            url: isFirstVideo ? defaultVideoUrl || '/assets/nira-loop.mp4' : url,
+            url: isFirstVideo ? defaultVideoUrl || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : url,
             type: isFirstVideo ? 'video' : 'image',
             aspectRatio: '9:16',
             fit: project?.coverFit || 'cover',
@@ -147,7 +189,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       ? [
           {
             id: 'fallback-media',
-            url: project.hasVideo ? defaultVideoUrl || '/assets/nira-loop.mp4' : defaultPosterUrl,
+            url: project.hasVideo ? defaultVideoUrl || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : defaultPosterUrl,
             type: project.hasVideo ? 'video' : 'image',
             aspectRatio: '9:16',
             fit: project.coverFit || 'cover',
@@ -163,6 +205,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     setActiveMediaIndex((prev) => (prev + 1) % galleryItems.length);
     setIsPlayingVideo(false);
     setVideoError(false);
+    setVideoProgress(0);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
   };
 
   const handlePrevMedia = () => {
@@ -170,6 +217,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     setActiveMediaIndex((prev) => (prev - 1 + galleryItems.length) % galleryItems.length);
     setIsPlayingVideo(false);
     setVideoError(false);
+    setVideoProgress(0);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
   };
 
   const toggleVideoPlayback = () => {
@@ -180,8 +232,26 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     } else {
       videoRef.current
         .play()
-        .then(() => setIsPlayingVideo(true))
-        .catch(() => setVideoError(true));
+        .then(() => {
+          setIsPlayingVideo(true);
+          setVideoError(false);
+        })
+        .catch(() => {
+          // If unmuted playback was rejected by browser, mute and play
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            setIsMuted(true);
+            videoRef.current
+              .play()
+              .then(() => {
+                setIsPlayingVideo(true);
+                setVideoError(false);
+              })
+              .catch(() => setVideoError(true));
+          } else {
+            setVideoError(true);
+          }
+        });
     }
   };
 
@@ -252,7 +322,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const target = e.currentTarget;
     target.onerror = null;
-    target.src = '/assets/work/luxury-fragrance.jpg';
+    target.src = project?.coverImage || '/assets/work/nelson-diamond.png';
+  };
+
+  const handleVideoError = () => {
+    if (
+      videoRef.current &&
+      videoRef.current.src &&
+      !videoRef.current.src.endsWith('/assets/nira-loop.mp4')
+    ) {
+      // Gracefully recover to SGS showcase reel if uploaded video URL or blob expired
+      videoRef.current.src = '/assets/nira-loop.mp4';
+      videoRef.current.load();
+      setVideoError(false);
+    } else {
+      setVideoError(true);
+    }
   };
 
   const getFocalClass = (f?: string) => {
@@ -270,15 +355,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
-  const activePoster = isImageUrl(currentMedia.poster)
-    ? currentMedia.poster
-    : isImageUrl(currentMedia.url)
-    ? currentMedia.url
-    : isImageUrl(project.posterUrl)
-    ? project.posterUrl
-    : isImageUrl(project.coverImage)
-    ? project.coverImage
-    : '/assets/work/luxury-fragrance.jpg';
+  const activePoster = getMediaDisplaySrc(currentMedia);
 
   return (
     <div
@@ -379,6 +456,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     ) : (
                       <>
                         <video
+                          key={`modal-video-${currentMedia.id || activeMediaIndex}-${currentMedia.url}`}
                           ref={videoRef}
                           src={currentMedia.url}
                           poster={activePoster}
@@ -391,9 +469,27 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                             setIsPlayingVideo(false);
                             setVideoProgress(100);
                           }}
-                          onError={() => setVideoError(true)}
+                          onError={handleVideoError}
                           onClick={toggleVideoPlayback}
                         />
+
+                        {/* Sound Status Pill */}
+                        {isPlayingVideo && isMuted && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (videoRef.current) {
+                                videoRef.current.muted = false;
+                                setIsMuted(false);
+                              }
+                            }}
+                            className="absolute top-3 right-3 z-30 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/75 hover:bg-black text-white text-[10px] font-mono border border-white/20 backdrop-blur shadow cursor-pointer transition hover:scale-105"
+                          >
+                            <VolumeX className="size-3 text-amber-400" />
+                            <span>Tap for sound</span>
+                          </button>
+                        )}
 
                         {/* Center Play Button Overlay */}
                         {!isPlayingVideo && (
@@ -450,7 +546,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   /* 9:16 Vertical Poster Visual */
                   <div className="relative h-full w-full flex items-center justify-center bg-black">
                     <img
-                      src={currentMedia.url}
+                      key={`modal-img-${currentMedia.id || activeMediaIndex}-${getMediaDisplaySrc(currentMedia)}`}
+                      src={getMediaDisplaySrc(currentMedia)}
                       alt={`${project.title} asset 0${activeMediaIndex + 1}`}
                       onError={handleImageError}
                       className={`h-full w-full select-none ${
@@ -500,7 +597,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <div className="mt-4 flex items-center gap-2 overflow-x-auto w-full pb-2 no-scrollbar justify-start sm:justify-center">
               {galleryItems.map((thumb, idx) => {
                 const isSelected = activeMediaIndex === idx;
-                const thumbImg = thumb.poster || thumb.url;
+                const thumbImg = getMediaDisplaySrc(thumb);
                 return (
                   <button
                     key={thumb.id || idx}
@@ -508,6 +605,12 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     onClick={() => {
                       setActiveMediaIndex(idx);
                       setIsPlayingVideo(false);
+                      setVideoError(false);
+                      setVideoProgress(0);
+                      if (videoRef.current) {
+                        videoRef.current.pause();
+                        videoRef.current.currentTime = 0;
+                      }
                     }}
                     className={`relative aspect-[9/16] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border transition-all cursor-pointer bg-black ${
                       isSelected
@@ -516,6 +619,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     }`}
                   >
                     <img
+                      key={`thumb-img-${thumb.id || idx}-${thumbImg}`}
                       src={thumbImg}
                       alt={`Thumbnail 0${idx + 1}`}
                       onError={handleImageError}

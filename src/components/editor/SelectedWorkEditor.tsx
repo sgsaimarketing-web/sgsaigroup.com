@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { MediaControl } from './MediaControl.tsx';
+import { VideoThumbnailPicker } from './VideoThumbnailPicker.tsx';
 import {
   FolderKanban,
   Plus,
@@ -31,6 +32,7 @@ export const SelectedWorkEditor: React.FC = () => {
     addCaseStudy,
     deleteCaseStudy,
     duplicateCaseStudy,
+    saveProjectVideoBlob,
   } = useSiteContent();
 
   const [activeCatId, setActiveCatId] = useState<string>(
@@ -61,21 +63,22 @@ export const SelectedWorkEditor: React.FC = () => {
   const updateGallery = (project: CaseStudy, newGallery: GalleryMediaItem[]) => {
     updateSingleCaseStudy(project.id, {
       gallery: newGallery,
-      thumbnails: newGallery.map((g) => g.url),
+      thumbnails: newGallery.map((g) => (g.type === 'video' ? (g.poster || g.url) : g.url)),
     });
   };
 
   const addGalleryItem = (project: CaseStudy) => {
     const current = getProjectGallery(project);
+    const defaultVisual = project.coverImage || '/assets/work/nelson-diamond.png';
     const newItem: GalleryMediaItem = {
       id: `media-${Date.now()}`,
-      url: '/assets/work/luxury-fragrance.jpg',
+      url: defaultVisual,
       type: 'image',
       aspectRatio: '9:16',
       fit: 'cover',
       focalPoint: 'center',
       caption: `New 9:16 Asset 0${current.length + 1}`,
-      poster: '/assets/work/luxury-fragrance.jpg',
+      poster: defaultVisual,
     };
     updateGallery(project, [...current, newItem]);
     setEditorNotice(null);
@@ -467,18 +470,32 @@ export const SelectedWorkEditor: React.FC = () => {
                       <Video className="size-3.5" />
                       Showcase Video Stream (9:16 MP4 / WebM)
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSingleCaseStudy(activeProject.id, {
-                          videoUrl: '/assets/nira-loop.mp4',
-                          hasVideo: true,
-                        })
-                      }
-                      className="px-2.5 py-1 rounded bg-[#2563EB]/20 border border-[#2563EB]/40 hover:bg-[#2563EB] text-[10px] text-white font-medium transition cursor-pointer"
-                    >
-                      Use SGS Showreel Reel
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSingleCaseStudy(activeProject.id, {
+                            videoUrl: '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4',
+                            hasVideo: true,
+                          })
+                        }
+                        className="px-2 py-1 rounded bg-[#2563EB] hover:bg-[#1D4ED8] text-[10px] text-white font-medium transition cursor-pointer"
+                      >
+                        Nelson Reel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSingleCaseStudy(activeProject.id, {
+                            videoUrl: '/assets/nira-loop.mp4',
+                            hasVideo: true,
+                          })
+                        }
+                        className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-white/80 font-medium transition cursor-pointer"
+                      >
+                        SGS Reel
+                      </button>
+                    </div>
                   </div>
 
                   <MediaControl
@@ -490,6 +507,17 @@ export const SelectedWorkEditor: React.FC = () => {
                     aspectRatio="9:16"
                     posterUrl={activeProject.posterUrl || activeProject.coverImage}
                     allowVideo={true}
+                    onVideoFileSelect={async (file) => {
+                      try {
+                        const liveUrl = await saveProjectVideoBlob(activeProject.id, file);
+                        updateSingleCaseStudy(activeProject.id, {
+                          videoUrl: liveUrl,
+                          hasVideo: true,
+                        });
+                      } catch (e) {
+                        console.error('Failed to save video blob to IndexedDB:', e);
+                      }
+                    }}
                     onChange={(patch) => {
                       updateSingleCaseStudy(activeProject.id, {
                         videoUrl: patch.url || activeProject.videoUrl || '/assets/nira-loop.mp4',
@@ -497,6 +525,29 @@ export const SelectedWorkEditor: React.FC = () => {
                       });
                     }}
                   />
+
+                  {/* Interactive Video Frame Grabber & Thumbnail Picker */}
+                  <div className="pt-2">
+                    <VideoThumbnailPicker
+                      videoUrl={activeProject.videoUrl || '/assets/nira-loop.mp4'}
+                      currentPosterUrl={activeProject.posterUrl || activeProject.coverImage}
+                      onSelectPoster={(posterDataUrl) => {
+                        const currentGall = getProjectGallery(activeProject);
+                        const updatedGall = currentGall.map((item, idx) => {
+                          if (idx === 0 && (item.type === 'video' || activeProject.hasVideo)) {
+                            return { ...item, poster: posterDataUrl };
+                          }
+                          return item;
+                        });
+                        updateSingleCaseStudy(activeProject.id, {
+                          posterUrl: posterDataUrl,
+                          coverImage: posterDataUrl,
+                          gallery: updatedGall,
+                          thumbnails: updatedGall.map((g) => (g.type === 'video' ? (g.poster || g.url) : g.url)),
+                        });
+                      }}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -594,10 +645,15 @@ export const SelectedWorkEditor: React.FC = () => {
                         allowVideo={true}
                         onChange={(patch) => {
                           const gallery = [...getProjectGallery(activeProject)];
+                          const isImg = (patch.type || gallery[gIdx].type) === 'image';
+                          const updatedUrl = patch.url || gallery[gIdx].url;
                           gallery[gIdx] = {
                             ...gallery[gIdx],
                             ...patch,
-                            url: patch.url || gallery[gIdx].url,
+                            url: updatedUrl,
+                            poster: isImg
+                              ? updatedUrl
+                              : (gallery[gIdx].poster || activeProject.posterUrl || activeProject.coverImage),
                           };
                           updateGallery(activeProject, gallery);
                         }}

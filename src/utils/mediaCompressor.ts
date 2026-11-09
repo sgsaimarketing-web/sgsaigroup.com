@@ -26,14 +26,16 @@ export async function processMediaUpload(
   maxHeight = 1600,
   quality = 0.82
 ): Promise<CompressionResult> {
-  const isVideo = file.type.startsWith('video/');
+  const isVideo =
+    file.type.startsWith('video/') ||
+    /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
   const originalSizeKb = Math.round(file.size / 1024);
 
   // Video handling: Use native ObjectURL to prevent base64 decoder stalls and black screens
   if (isVideo) {
-    if (file.size > 25 * 1024 * 1024) {
+    if (file.size > 150 * 1024 * 1024) {
       throw new Error(
-        `Video size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 25MB limit. Please upload an optimized vertical 9:16 MP4/WebM clip.`
+        `Video size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds 150MB limit. Please upload an optimized vertical 9:16 MP4/WebM clip.`
       );
     }
 

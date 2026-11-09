@@ -68,14 +68,16 @@ test('selected work has 4 interactive categories and rich case study dossiers', 
   assert.ok(categoryIds.includes('corporate-solutions'));
   assert.ok(categoryIds.includes('ai-systems'));
 
-  const luxuryFragrance = CASE_STUDIES.find((c) => c.id === 'luxury-fragrance-launch');
-  assert.ok(luxuryFragrance);
-  assert.equal(luxuryFragrance.sector, 'FMCG');
-  assert.ok(luxuryFragrance.challenge);
-  assert.ok(luxuryFragrance.approach);
-  assert.ok(luxuryFragrance.execution);
-  assert.ok(luxuryFragrance.outcome);
-  assert.ok(luxuryFragrance.thumbnails.length >= 4);
+  const primaryProject = CASE_STUDIES.find(
+    (c) => c.id === 'nelson-trading-launch' || c.id === 'luxury-fragrance-launch'
+  );
+  assert.ok(primaryProject);
+  assert.equal(primaryProject.sector, 'FMCG');
+  assert.ok(primaryProject.challenge);
+  assert.ok(primaryProject.approach);
+  assert.ok(primaryProject.execution);
+  assert.ok(primaryProject.outcome);
+  assert.ok(primaryProject.thumbnails.length >= 4);
 });
 
 test('contact section preserves verified direct communication links', () => {
