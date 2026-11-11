@@ -159,27 +159,35 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({ onSelectProject }) =
 
           {/* Carousel Header & Arrow Controls */}
           <div className="flex items-center justify-between pt-8 pb-4">
-            <p className="text-xs uppercase tracking-widest text-[#64748B] font-semibold">
-              {workCategories.find((c) => c.id === activeCategory)?.label} ({filteredProjects.length} Verified Deployments)
-            </p>
-
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handlePrev}
-                aria-label="Previous case studies"
-                className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-white text-[#101318] hover:border-[#2563EB] hover:text-[#2563EB] transition-colors cursor-pointer shadow-sm active:scale-95"
-              >
-                <ArrowLeft className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleNext}
-                aria-label="Next case studies"
-                className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-white text-[#101318] hover:border-[#2563EB] hover:text-[#2563EB] transition-colors cursor-pointer shadow-sm active:scale-95"
-              >
-                <ArrowRight className="size-4" />
-              </button>
+              <span className="size-2 rounded-full bg-[#2563EB]" aria-hidden="true" />
+              <p className="text-xs uppercase tracking-widest text-[#64748B] font-semibold">
+                {workCategories.find((c) => c.id === activeCategory)?.label} ({filteredProjects.length} Verified Deployments)
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-xs font-semibold text-[#64748B] tabular-nums">
+                0{carouselIndex + 1} / 0{Math.max(1, filteredProjects.length)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handlePrev}
+                  aria-label="Previous case studies"
+                  className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-white text-[#101318] hover:border-[#2563EB] hover:text-[#2563EB] transition-colors cursor-pointer shadow-sm active:scale-95"
+                >
+                  <ArrowLeft className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  aria-label="Next case studies"
+                  className="flex size-9 items-center justify-center rounded-full border border-black/15 bg-white text-[#101318] hover:border-[#2563EB] hover:text-[#2563EB] transition-colors cursor-pointer shadow-sm active:scale-95"
+                >
+                  <ArrowRight className="size-4" />
+                </button>
+              </div>
             </div>
           </div>
 

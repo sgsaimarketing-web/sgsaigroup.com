@@ -45,11 +45,12 @@ export const Header: React.FC = () => {
     setMobileMenuOpen(false);
   };
 
-  const topOffsetClass = isAuthorized && isEditorOpen ? 'top-14' : 'top-0';
+  const topOffsetStyle = isAuthorized && isEditorOpen ? { top: '3.5rem' } : { top: '0' };
 
   return (
     <header
-      className={`fixed inset-x-0 ${topOffsetClass} z-50 transition-all duration-300 border-b ${
+      style={topOffsetStyle}
+      className={`fixed inset-x-0 z-50 transition-all duration-300 border-b ${
         scrolled
           ? 'bg-[#101318]/95 border-white/[0.08] shadow-2xl backdrop-blur-md'
           : 'bg-[#101318]/90 border-white/[0.06] backdrop-blur-sm'
@@ -59,7 +60,7 @@ export const Header: React.FC = () => {
         {/* SGS Master Brand Wordmark / Original Logo */}
         <a
           href="#home"
-          className="inline-flex items-center gap-3 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#2563EB] rounded-sm group"
+          className="inline-flex items-center gap-3 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-sm group shrink-0"
           aria-label="SGS AI Group home"
           onClick={handleNavClick}
         >
@@ -68,7 +69,7 @@ export const Header: React.FC = () => {
             alt="SGS AI Group"
             width={120}
             height={32}
-            className="h-8 w-auto object-contain"
+            className="h-8 w-auto object-contain shrink-0"
           />
         </a>
 
@@ -84,7 +85,7 @@ export const Header: React.FC = () => {
               <a
                 key={item.href}
                 href={item.href}
-                className={`relative py-1 text-sm font-medium transition-colors ${
+                className={`relative py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
                   isActive
                     ? 'text-white font-semibold'
                     : 'text-[#94A3B8] hover:text-white'
@@ -103,10 +104,10 @@ export const Header: React.FC = () => {
         </nav>
 
         {/* Header Right Action: Mockup "Let's Talk →" Button */}
-        <div className="hidden md:flex items-center gap-4">
+        <div className="hidden md:flex items-center gap-4 shrink-0">
           <a
             href="#contact"
-            className="group relative inline-flex items-center justify-center gap-2 rounded-full bg-[#2563EB] px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-[#2563EB]/25 transition-all duration-300 hover:bg-[#1D4ED8] hover:shadow-[0_0_24px_rgba(37,99,235,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="group relative inline-flex items-center justify-center gap-2 rounded-full bg-[#2563EB] px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-[#2563EB]/25 transition-all duration-300 hover:bg-[#1D4ED8] hover:shadow-[0_0_24px_rgba(37,99,235,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] whitespace-nowrap"
           >
             <span>Let's Talk</span>
             <ArrowRight className="size-3.5 transition-transform duration-300 group-hover:translate-x-1" />
@@ -118,7 +119,7 @@ export const Header: React.FC = () => {
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="inline-flex items-center justify-center rounded-lg p-2.5 text-[#94A3B8] hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="inline-flex items-center justify-center rounded-lg p-2.5 text-[#94A3B8] hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] cursor-pointer min-h-[44px] min-w-[44px]"
             aria-expanded={mobileMenuOpen}
             aria-label="Toggle navigation menu"
           >
@@ -129,16 +130,16 @@ export const Header: React.FC = () => {
 
       {/* Mobile Menu Overlay */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-white/10 bg-[#101318]/98 px-6 pt-2 pb-8 backdrop-blur-xl animate-in fade-in duration-200">
+        <div className="md:hidden border-b border-white/10 bg-[#101318]/98 px-6 pt-2 pb-8 backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="pb-4 border-b border-white/10 mb-4">
             <p className="font-display font-bold text-xs uppercase tracking-wider text-[#2563EB]">
               SGS AI Group
             </p>
-            <p className="text-sm text-[#94A3B8] mt-1">
-              Human Thinking. Intelligent Execution.
+            <p className="text-sm text-[#94A3B8] mt-1 font-normal">
+              Creative Intelligence × AI Engineering
             </p>
           </div>
-          <nav className="flex flex-col space-y-3" aria-label="Mobile Navigation">
+          <nav className="flex flex-col space-y-1" aria-label="Mobile Navigation">
             {navLinks.map((item) => {
               const sectionId = item.href.replace('#', '');
               const isActive = activeSection === sectionId;
@@ -147,20 +148,20 @@ export const Header: React.FC = () => {
                   key={item.href}
                   href={item.href}
                   onClick={handleNavClick}
-                  className={`text-base font-medium py-2 transition-colors flex items-center justify-between ${
-                    isActive ? 'text-[#2563EB]' : 'text-[#94A3B8] hover:text-white'
+                  className={`text-base font-medium py-3 px-2 rounded-lg transition-colors flex items-center justify-between min-h-[48px] ${
+                    isActive ? 'text-[#2563EB] bg-white/[0.04]' : 'text-[#94A3B8] hover:text-white hover:bg-white/[0.02]'
                   }`}
                 >
                   <span>{item.label}</span>
-                  {isActive && <span className="size-1.5 rounded-full bg-[#2563EB]" />}
+                  {isActive && <span className="size-2 rounded-full bg-[#2563EB]" />}
                 </a>
               );
             })}
-            <div className="pt-6 border-t border-white/10">
+            <div className="pt-6 border-t border-white/10 mt-3">
               <a
                 href="#contact"
                 onClick={handleNavClick}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-[#2563EB] px-5 py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#1D4ED8] transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-full bg-[#2563EB] px-5 py-3.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-[#1D4ED8] transition-colors shadow-lg shadow-[#2563EB]/25"
               >
                 <span>Let's Talk</span>
                 <ArrowRight className="size-4" />

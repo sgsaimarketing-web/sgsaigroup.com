@@ -51,13 +51,13 @@ export const WhoWeAre: React.FC = () => {
             </div>
 
             {/* Right Column: 3 Discipline Photo Cards matching Mockup */}
-            <div className="lg:col-span-7 grid gap-4 sm:grid-cols-3 reveal">
+            <div className="lg:col-span-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 reveal">
               {whoWeAre.cards.map((card) => (
                 <div
                   key={card.title}
-                  className="group relative overflow-hidden rounded-sm bg-[#101318] border border-black/[0.08] shadow-md transition-all duration-300 hover:shadow-xl hover:-translate-y-1"
+                  className="group relative overflow-hidden rounded-md bg-[#101318] border border-black/[0.08] shadow-md transition-all duration-300 hover:shadow-2xl hover:-translate-y-1"
                 >
-                  <div className="aspect-[4/5] w-full overflow-hidden">
+                  <div className="aspect-[4/5] w-full overflow-hidden relative">
                     <img
                       src={card.image}
                       alt={card.imageAlt || card.title}
@@ -65,18 +65,24 @@ export const WhoWeAre: React.FC = () => {
                       decoding="async"
                       width={600}
                       height={750}
-                      className={`h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 opacity-85 group-hover:opacity-100 ${getFocalClass(
+                      className={`h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 opacity-90 group-hover:opacity-100 will-change-transform ${getFocalClass(
                         card.focalPoint
                       )}`}
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#101318] via-[#101318]/50 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#101318] via-[#101318]/55 to-transparent pointer-events-none" />
                   </div>
 
                   <div className="absolute inset-x-0 bottom-0 p-5 text-white">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="size-1 rounded-full bg-[#2563EB]" aria-hidden="true" />
+                      <span className="text-[10px] font-mono tracking-wider text-[#38BDF8] uppercase">
+                        Discipline
+                      </span>
+                    </div>
                     <h3 className="font-display text-xl font-black uppercase tracking-wider text-white">
                       {card.title}
                     </h3>
-                    <p className="mt-1 text-xs text-[#CBD5E1] leading-relaxed">
+                    <p className="mt-1 text-xs text-[#CBD5E1] leading-relaxed [text-wrap:pretty]">
                       {card.subtitle}
                     </p>
                   </div>

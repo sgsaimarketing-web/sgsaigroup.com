@@ -73,40 +73,40 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
         )}
 
         {/* Cinematic Gradient Shade */}
-        <div className="hero-shade absolute inset-0 pointer-events-none" aria-hidden="true" />
+        <div className="hero-shade absolute inset-0 pointer-events-none bg-gradient-to-t from-[#101318] via-[#101318]/65 to-black/35" aria-hidden="true" />
 
         {/* Hero Content Grid matching Mockup Section 01 */}
-        <div className="hero-content relative mx-auto grid w-full max-w-7xl grid-rows-[1fr_auto] px-6 lg:px-8 z-10">
-          <div className="flex flex-col justify-center pt-8 md:pt-14 pb-8 max-w-3xl">
+        <div className="hero-content relative mx-auto grid w-full max-w-7xl grid-rows-[1fr_auto] px-6 lg:px-8 z-10 flex-1">
+          <div className="flex flex-col justify-center pt-8 sm:pt-12 md:pt-16 pb-8 max-w-3xl">
             {/* Index 01 & Eyebrow */}
             <div className="animate-rise flex items-center gap-3">
               <span className="font-display text-xs font-bold text-[#2563EB]">01</span>
               <span className="h-3 w-[2px] bg-[#2563EB]" aria-hidden="true" />
-              <p className="hero-eyebrow eyebrow text-[#94A3B8] text-[11px] font-semibold tracking-[0.2em]">
+              <p className="hero-eyebrow eyebrow text-[#94A3B8] text-[11px] font-semibold tracking-[0.2em] uppercase">
                 {hero.eyebrow}
               </p>
             </div>
 
-            {/* Master Headline */}
-            <h1 className="hero-title mt-6 font-display font-extrabold uppercase leading-[0.94] tracking-[-0.035em] text-white">
-              <span className="hero-line">{hero.headlineLines[0] || 'WE BUILD WHAT'}</span>
-              <span className="hero-line">{hero.headlineLines[1] || 'MOVES BUSINESS'}</span>
-              <span className="hero-line text-white">
+            {/* Master Headline with Fluid Typographic Scale & Balance */}
+            <h1 className="hero-title mt-5 sm:mt-6 font-display font-black uppercase text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[0.92] tracking-[-0.035em] text-white [text-wrap:balance]">
+              <span className="block hero-line">{hero.headlineLines[0] || 'WE BUILD WHAT'}</span>
+              <span className="block hero-line text-white/95">{hero.headlineLines[1] || 'MOVES BUSINESS'}</span>
+              <span className="block hero-line text-[#38BDF8]">
                 {hero.headlineLines[2] || 'FORWARD.'}
               </span>
             </h1>
 
             {/* Subtitle Paragraph */}
-            <div className="hero-support animate-rise mt-6 max-w-xl">
-              <p className="text-base md:text-lg leading-relaxed text-[#CBD5E1] font-normal">
+            <div className="hero-support animate-rise mt-5 sm:mt-6 max-w-xl">
+              <p className="text-sm sm:text-base md:text-lg leading-relaxed text-[#CBD5E1] font-normal [text-wrap:pretty]">
                 {hero.supportParagraph}
               </p>
 
               {/* Mockup Dual Actions */}
-              <div className="mt-8 flex flex-wrap items-center gap-4">
+              <div className="mt-7 sm:mt-8 flex flex-wrap items-center gap-3.5 sm:gap-4">
                 <a
                   href={hero.primaryCta.href || '#our-work'}
-                  className="group relative inline-flex items-center justify-center gap-3 rounded-full bg-[#2563EB] px-7 py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-xl transition-all duration-300 hover:bg-[#1D4ED8] hover:shadow-[0_0_28px_rgba(37,99,235,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  className="group relative inline-flex items-center justify-center gap-3 rounded-full bg-[#2563EB] px-6 sm:px-7 py-3 sm:py-3.5 text-xs font-bold uppercase tracking-wider text-white shadow-xl transition-all duration-300 hover:bg-[#1D4ED8] hover:shadow-[0_0_28px_rgba(37,99,235,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] whitespace-nowrap"
                 >
                   <span>{hero.primaryCta.label}</span>
                   <ArrowRight className="size-4 shrink-0 transition-transform duration-300 group-hover:translate-x-1" />
@@ -115,10 +115,10 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
                 <button
                   type="button"
                   onClick={onOpenShowreel}
-                  className="group inline-flex items-center justify-center gap-3 rounded-full border border-white/20 bg-white/[0.04] px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-white backdrop-blur-sm transition-all duration-300 hover:border-white/50 hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] cursor-pointer"
+                  className="group inline-flex items-center justify-center gap-2.5 rounded-full border border-white/20 bg-white/[0.05] px-5 sm:px-6 py-3 sm:py-3.5 text-xs font-semibold uppercase tracking-wider text-white backdrop-blur-sm transition-all duration-300 hover:border-white/50 hover:bg-white/[0.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] cursor-pointer whitespace-nowrap"
                 >
                   <span>{hero.secondaryCta.label}</span>
-                  <span className="flex size-5 items-center justify-center rounded-full bg-white/10 group-hover:bg-[#2563EB] transition-colors">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-white/10 group-hover:bg-[#2563EB] transition-colors shrink-0">
                     <Play className="size-2.5 fill-white text-white ml-0.5" />
                   </span>
                 </button>
@@ -127,17 +127,17 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
           </div>
 
           {/* NIRA Bottom-Right Signature Badge from Mockup */}
-          <div className="mt-8 flex items-end justify-between border-t border-white/[0.08] pt-6 pb-2">
-            <div className="flex items-center gap-3 text-xs uppercase tracking-[0.16em] text-[#94A3B8]">
+          <div className="mt-8 flex items-end justify-between border-t border-white/[0.08] pt-5 pb-3">
+            <div className="flex items-center gap-2.5 text-[11px] sm:text-xs uppercase tracking-[0.16em] text-[#94A3B8]">
               <span className="size-1.5 rounded-full bg-[#2563EB]" aria-hidden="true" />
               <span>{config.positioning || 'Creative Intelligence × AI Engineering'}</span>
             </div>
 
             <div className="text-right">
-              <p className="font-display font-extrabold text-sm tracking-wider text-white">
+              <p className="font-display font-extrabold text-xs sm:text-sm tracking-wider text-white">
                 {hero.niraBadge.title}
               </p>
-              <p className="text-[10px] tracking-[0.2em] text-[#94A3B8] font-medium">
+              <p className="text-[9px] sm:text-[10px] tracking-[0.2em] text-[#94A3B8] font-medium uppercase">
                 {hero.niraBadge.subtitle}
               </p>
             </div>

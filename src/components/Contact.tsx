@@ -50,9 +50,20 @@ export const Contact: React.FC = () => {
     return `mailto:${TARGET_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const isValidEmail = (emailStr: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr.trim());
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.email) return;
+    if (!formData.name.trim()) return;
+    if (!isValidEmail(formData.email)) {
+      setEmailError('Please enter a valid business email address.');
+      return;
+    }
+    setEmailError(null);
     setLoading(true);
 
     const waUrl = generateWhatsAppUrl();
@@ -245,10 +256,22 @@ export const Contact: React.FC = () => {
                       type="email"
                       required
                       value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      onChange={(e) => {
+                        setFormData({ ...formData, email: e.target.value });
+                        if (emailError) setEmailError(null);
+                      }}
                       placeholder="e.g. sarah@enterprise.com"
-                      className="mt-1.5 w-full rounded-sm border border-black/[0.12] bg-[#F8FAFC] px-4 py-2.5 text-sm text-[#101318] placeholder-[#94A3B8] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                      className={`mt-1.5 w-full rounded-sm border px-4 py-2.5 text-sm text-[#101318] placeholder-[#94A3B8] focus:bg-white focus:outline-none focus:ring-1 ${
+                        emailError
+                          ? 'border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500'
+                          : 'border-black/[0.12] bg-[#F8FAFC] focus:border-[#2563EB] focus:ring-[#2563EB]'
+                      }`}
                     />
+                    {emailError && (
+                      <p className="mt-1 text-xs text-red-600 font-medium">
+                        {emailError}
+                      </p>
+                    )}
                   </div>
 
                   <div>
