@@ -1,34 +1,54 @@
-import React, { useState } from 'react';
-import { Upload, Image, Video, Check, RefreshCw, Eye, Sparkles, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Upload, Image, Video, RefreshCw, Sparkles, AlertCircle, Monitor, Tablet, Smartphone, Layers, RotateCcw } from 'lucide-react';
 import { processMediaUpload, CompressionResult } from '../../utils/mediaCompressor.ts';
+import type {
+  DeviceBreakpoint,
+  DeviceHeightScale,
+  DeviceMediaOverride,
+  MediaAspectRatio,
+  MediaFitMode,
+  MediaFocalPoint,
+  ResponsiveMediaOverrides,
+} from '../../data/siteContent.ts';
+import { useSiteContent } from '../../context/ContentContext.tsx';
+import { mapPreviewDeviceToBreakpoint } from '../../utils/responsiveMedia.ts';
 
 interface MediaControlProps {
   label: string;
   url: string;
   mediaType?: 'image' | 'video';
-  fit?: 'cover' | 'contain';
-  focalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
-  aspectRatio?: '16:9' | '9:16' | '4:5' | '1:1' | '3:2' | 'auto';
+  fit?: MediaFitMode;
+  focalPoint?: MediaFocalPoint;
+  aspectRatio?: MediaAspectRatio;
   caption?: string;
   posterUrl?: string;
+  responsiveMedia?: ResponsiveMediaOverrides;
+  onResponsiveChange?: (next: ResponsiveMediaOverrides) => void;
+  showHeightScale?: boolean;
   onPosterChange?: (poster: string) => void;
   onVideoFileSelect?: (file: File) => void;
   onChange: (patch: {
     url?: string;
     type?: 'image' | 'video';
-    fit?: 'cover' | 'contain';
-    focalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
-    aspectRatio?: '16:9' | '9:16' | '4:5' | '1:1' | '3:2' | 'auto';
+    fit?: MediaFitMode;
+    focalPoint?: MediaFocalPoint;
+    aspectRatio?: MediaAspectRatio;
     caption?: string;
   }) => void;
   allowVideo?: boolean;
 }
 
 const PRESET_ASSETS = [
+  { label: 'Alzara Selera Terangkat Reel', url: '/assets/work/alzara-curry-reel.mp4', type: 'video' },
+  { label: 'My Kaapie Filter Coffee Reel', url: '/assets/work/mykaapie-coffee-reel.mp4', type: 'video' },
   { label: 'Nelson Official Video Reel', url: '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4', type: 'video' },
-  { label: 'SGS NIRA Showcase Reel', url: '/assets/nira-loop.mp4', type: 'video' },
+  { label: 'Alzara Curry Poster', url: '/assets/work/alzara-curry-poster.webp', type: 'image' },
+  { label: 'My Kaapie Coffee Poster', url: '/assets/work/mykaapie-coffee-poster.webp', type: 'image' },
+  { label: 'Biho Food Festive Poster', url: '/assets/work/biho-festive-poster.webp', type: 'image' },
+  { label: 'Biho Food Gift Hamper', url: '/assets/work/biho-gift-bag.webp', type: 'image' },
   { label: 'Nelson Diamond Inspection', url: '/assets/work/nelson-diamond.png', type: 'image' },
   { label: 'Nelson Trading Cosmic', url: '/assets/work/nelson-trading.png', type: 'image' },
+  { label: 'SGS NIRA Showcase Reel', url: '/assets/nira-loop.mp4', type: 'video' },
   { label: 'NIRA Official Hero', url: '/assets/nira-official.png', type: 'image' },
   { label: 'Connected Earth', url: '/assets/nira-connected-earth.png', type: 'image' },
   { label: 'Luxury Fragrance', url: '/assets/work/luxury-fragrance.jpg', type: 'image' },
@@ -54,11 +74,15 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   aspectRatio = 'auto',
   caption,
   posterUrl,
+  responsiveMedia,
+  onResponsiveChange,
+  showHeightScale = false,
   onPosterChange,
   onVideoFileSelect,
   onChange,
   allowVideo = true,
 }) => {
+  const { previewDevice, setPreviewDevice } = useSiteContent();
   const [showPresets, setShowPresets] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressingLabel, setCompressingLabel] = useState('Compressing...');
@@ -66,6 +90,63 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [compressionBadge, setCompressionBadge] = useState<string | null>(null);
   const [previewAspect, setPreviewAspect] = useState<'current' | '9:16' | 'landscape'>('current');
+  const [editingTarget, setEditingTarget] = useState<'base' | DeviceBreakpoint>('base');
+
+  // Keep selected override tab in sync if toolbar device changes while inspecting a device override
+  useEffect(() => {
+    if (editingTarget !== 'base') {
+      setEditingTarget(mapPreviewDeviceToBreakpoint(previewDevice));
+    }
+  }, [previewDevice, editingTarget]);
+
+  const activeOverride: DeviceMediaOverride | undefined =
+    editingTarget === 'base' ? undefined : responsiveMedia?.[editingTarget];
+  const hasDeviceCustom =
+    editingTarget !== 'base' &&
+    !!activeOverride &&
+    Object.values(activeOverride).some((v) => v !== undefined);
+
+  const effectiveAspect: MediaAspectRatio =
+    editingTarget === 'base' ? aspectRatio : activeOverride?.aspectRatio || aspectRatio;
+  const effectiveFit: MediaFitMode =
+    editingTarget === 'base' ? fit : activeOverride?.fit || fit;
+  const effectiveFocal: MediaFocalPoint =
+    editingTarget === 'base' ? focalPoint : activeOverride?.focalPoint || focalPoint;
+  const effectiveHeightScale: DeviceHeightScale =
+    editingTarget === 'base' ? 'standard' : activeOverride?.heightScale || 'standard';
+
+  const handleSelectTarget = (target: 'base' | DeviceBreakpoint) => {
+    setEditingTarget(target);
+    if (target !== 'base') {
+      setPreviewDevice(target === 'laptop' ? 'desktop' : target);
+    }
+  };
+
+  const updateFraming = (patch: Partial<DeviceMediaOverride>) => {
+    if (editingTarget === 'base' || !onResponsiveChange) {
+      onChange({
+        aspectRatio: patch.aspectRatio,
+        fit: patch.fit,
+        focalPoint: patch.focalPoint,
+      });
+      return;
+    }
+    const next: ResponsiveMediaOverrides = {
+      ...(responsiveMedia || {}),
+      [editingTarget]: {
+        ...(responsiveMedia?.[editingTarget] || {}),
+        ...patch,
+      },
+    };
+    onResponsiveChange(next);
+  };
+
+  const resetDeviceOverride = () => {
+    if (editingTarget === 'base' || !onResponsiveChange || !responsiveMedia) return;
+    const next: ResponsiveMediaOverrides = { ...responsiveMedia };
+    delete next[editingTarget];
+    onResponsiveChange(next);
+  };
 
   // Detect genuine media type (avoid rendering a base64 image inside a <video> element)
   const isImageSrc = url.startsWith('data:image/') || url.endsWith('.png') || url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.webp');
@@ -267,15 +348,21 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   const getAspectPreviewClass = () => {
     if (previewAspect === '9:16') return 'aspect-[9/16] max-w-[170px]';
     if (previewAspect === 'landscape') return 'aspect-[16/9] w-full';
-    switch (aspectRatio) {
+    switch (effectiveAspect) {
       case '9:16':
         return 'aspect-[9/16] max-w-[170px]';
+      case '3:4':
+        return 'aspect-[3/4] max-w-[180px]';
       case '4:5':
         return 'aspect-[4/5] max-w-[190px]';
       case '1:1':
         return 'aspect-square max-w-[210px]';
+      case '4:3':
+        return 'aspect-[4/3] w-full';
       case '3:2':
         return 'aspect-[3/2] w-full';
+      case '16:10':
+        return 'aspect-[16/10] w-full';
       case '16:9':
         return 'aspect-[16/9] w-full';
       default:
@@ -302,7 +389,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
             </span>
           )}
           <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-white/5 text-[#94A3B8]">
-            {resolvedMediaType} · {aspectRatio}
+            {resolvedMediaType} · {effectiveAspect}
           </span>
         </div>
       </div>
@@ -322,8 +409,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
               <video
                 src={url}
                 poster={posterUrl || '/assets/work/luxury-fragrance.jpg'}
-                className={`h-full w-full ${fit === 'contain' ? 'object-contain' : 'object-cover'} ${getFocalClass(
-                  focalPoint
+                className={`h-full w-full ${effectiveFit === 'contain' ? 'object-contain' : 'object-cover'} ${getFocalClass(
+                  effectiveFocal
                 )}`}
                 controls
                 muted
@@ -333,8 +420,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
               <img
                 src={url}
                 alt="Preview"
-                className={`h-full w-full ${fit === 'contain' ? 'object-contain' : 'object-cover'} ${getFocalClass(
-                  focalPoint
+                className={`h-full w-full ${effectiveFit === 'contain' ? 'object-contain' : 'object-cover'} ${getFocalClass(
+                  effectiveFocal
                 )}`}
               />
             )
@@ -347,7 +434,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
           {/* Quick Fit Badge Overlay */}
           <div className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-mono text-white/80 backdrop-blur">
-            {fit} · {focalPoint}
+            {editingTarget !== 'base' ? `${editingTarget} · ` : ''}
+            {effectiveFit} · {effectiveFocal}
           </div>
         </div>
 
@@ -517,20 +605,93 @@ export const MediaControl: React.FC<MediaControlProps> = ({
         )}
       </div>
 
+      {/* Per-Device Media Sizing & Framing Override Bar */}
+      {onResponsiveChange && (
+        <div className="border-t border-white/10 pt-3 mt-1 space-y-2">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-[#94A3B8] font-medium">
+              Device Override Target
+            </span>
+            <div className="flex items-center gap-2">
+              {editingTarget !== 'base' && (
+                <span
+                  className={`px-1.5 py-0.5 rounded font-mono text-[9px] border ${
+                    hasDeviceCustom
+                      ? 'bg-[#2563EB]/20 text-[#38BDF8] border-[#2563EB]/40'
+                      : 'bg-white/5 text-white/50 border-white/10'
+                  }`}
+                >
+                  {hasDeviceCustom ? 'Custom' : 'Inherited'}
+                </span>
+              )}
+              {hasDeviceCustom && (
+                <button
+                  type="button"
+                  onClick={resetDeviceOverride}
+                  className="inline-flex items-center gap-1 text-[10px] text-white/60 hover:text-white cursor-pointer"
+                >
+                  <RotateCcw className="size-2.5" />
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1 rounded-lg bg-black/50 p-1 border border-white/10">
+            {(
+              [
+                { id: 'base', label: 'Base', icon: Layers },
+                { id: 'laptop', label: 'Laptop', icon: Monitor },
+                { id: 'tablet', label: 'Tablet', icon: Tablet },
+                { id: 'mobile', label: 'Mobile', icon: Smartphone },
+              ] as const
+            ).map((tab) => {
+              const Icon = tab.icon;
+              const active = editingTarget === tab.id;
+              const isCustomized =
+                tab.id !== 'base' &&
+                !!responsiveMedia?.[tab.id] &&
+                Object.values(responsiveMedia[tab.id] || {}).some((v) => v !== undefined);
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleSelectTarget(tab.id)}
+                  className={`flex items-center justify-center gap-1 rounded py-1 px-1.5 text-[10px] font-semibold transition cursor-pointer ${
+                    active
+                      ? 'bg-[#2563EB] text-white shadow-sm'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Icon className="size-3 shrink-0" />
+                  <span>{tab.label}</span>
+                  {isCustomized && (
+                    <span className="size-1.5 rounded-full bg-[#38BDF8]" aria-hidden="true" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Media Format & Cropping Controls */}
       <div className="grid grid-cols-3 gap-2 border-t border-white/5 pt-2 text-[11px]">
         {/* Aspect Ratio */}
         <div>
           <span className="text-white/50 block mb-1">Aspect Ratio</span>
           <select
-            value={aspectRatio}
-            onChange={(e) => onChange({ aspectRatio: e.target.value as any })}
+            value={effectiveAspect}
+            onChange={(e) => updateFraming({ aspectRatio: e.target.value as MediaAspectRatio })}
             className="w-full rounded bg-black/60 border border-white/10 px-2 py-1 text-xs text-white focus:outline-none"
           >
             <option value="auto">Auto / Original</option>
             <option value="16:9">16:9 Landscape</option>
+            <option value="16:10">16:10 Wide</option>
+            <option value="4:3">4:3 Standard</option>
             <option value="3:2">3:2 Photo</option>
             <option value="4:5">4:5 Portrait</option>
+            <option value="3:4">3:4 Card</option>
             <option value="9:16">9:16 Vertical</option>
             <option value="1:1">1:1 Square</option>
           </select>
@@ -538,10 +699,10 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
         {/* Fit Mode */}
         <div>
-          <span className="text-white/50 block mb-1">Fit & Framing</span>
+          <span className="text-white/50 block mb-1">Fit &amp; Framing</span>
           <select
-            value={fit}
-            onChange={(e) => onChange({ fit: e.target.value as any })}
+            value={effectiveFit}
+            onChange={(e) => updateFraming({ fit: e.target.value as MediaFitMode })}
             className="w-full rounded bg-black/60 border border-white/10 px-2 py-1 text-xs text-white focus:outline-none"
           >
             <option value="cover">Cover (Fill Frame)</option>
@@ -553,8 +714,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
         <div>
           <span className="text-white/50 block mb-1">Focal Anchor</span>
           <select
-            value={focalPoint}
-            onChange={(e) => onChange({ focalPoint: e.target.value as any })}
+            value={effectiveFocal}
+            onChange={(e) => updateFraming({ focalPoint: e.target.value as MediaFocalPoint })}
             className="w-full rounded bg-black/60 border border-white/10 px-2 py-1 text-xs text-white focus:outline-none"
           >
             <option value="center">Center</option>
@@ -565,6 +726,31 @@ export const MediaControl: React.FC<MediaControlProps> = ({
           </select>
         </div>
       </div>
+
+      {/* Optional Hero Height Scale Override per device */}
+      {showHeightScale && editingTarget !== 'base' && onResponsiveChange && (
+        <div className="mt-2 pt-2 border-t border-white/5 text-[11px]">
+          <span className="text-white/50 block mb-1">
+            Media Stage Height ({editingTarget})
+          </span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(['compact', 'standard', 'tall'] as const).map((scale) => (
+              <button
+                key={scale}
+                type="button"
+                onClick={() => updateFraming({ heightScale: scale })}
+                className={`py-1 px-2 rounded text-[10px] font-semibold capitalize border transition cursor-pointer ${
+                  effectiveHeightScale === scale
+                    ? 'bg-[#2563EB]/25 border-[#2563EB] text-white'
+                    : 'bg-black/40 border-white/10 text-white/60 hover:text-white'
+                }`}
+              >
+                {scale}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Optional Caption */}
       {caption !== undefined && (

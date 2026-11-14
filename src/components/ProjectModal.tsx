@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  X,
   ArrowLeft,
   ArrowRight,
   Play,
@@ -12,8 +11,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Video,
+  X,
 } from 'lucide-react';
 import { CaseStudy, GalleryMediaItem } from '../data/siteContent.ts';
+import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
+import {
+  getAspectRatioClass,
+  getFocalClass,
+  isImageAssetUrl,
+  isVideoAssetUrl,
+  resolveMediaForDevice,
+} from '../utils/responsiveMedia.ts';
 
 interface ProjectModalProps {
   project: CaseStudy | null;
@@ -28,6 +36,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   onClose,
   onSelectProject,
 }) => {
+  const device = useEffectiveDevice();
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
@@ -60,7 +69,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             .play()
             .then(() => setIsPlayingVideo(true))
             .catch(() => {
-              // Browser autoplay policy fallback: mute and play
               if (videoRef.current) {
                 videoRef.current.muted = true;
                 setIsMuted(true);
@@ -98,77 +106,52 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     onSelectProject(currentCategoryProjects[prevIdx]);
   };
 
-  const isVideoUrl = (u?: string): boolean => {
-    if (!u) return false;
-    return (
-      u.startsWith('data:video/') ||
-      u.startsWith('blob:') ||
-      u.endsWith('.mp4') ||
-      u.endsWith('.webm') ||
-      u.includes('.mp4?') ||
-      u.includes('.webm?')
-    );
-  };
-
-  const isImageUrl = (u?: string): boolean => {
-    if (!u) return false;
-    return (
-      u.startsWith('data:image/') ||
-      u.endsWith('.jpg') ||
-      u.endsWith('.jpeg') ||
-      u.endsWith('.png') ||
-      u.endsWith('.webp') ||
-      u.endsWith('.gif') ||
-      u.includes('.jpg?') ||
-      u.includes('.jpeg?') ||
-      u.includes('.png?') ||
-      u.includes('.webp?')
-    );
-  };
-
   const defaultVideoUrl: string =
-    project?.videoUrl ||
-    (project?.hasVideo ? '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : '') ||
-    '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4';
+    project?.videoUrl && isVideoAssetUrl(project.videoUrl)
+      ? project.videoUrl
+      : '/assets/nira-loop.mp4';
   const defaultPosterUrl: string =
-    project?.posterUrl && isImageUrl(project.posterUrl)
+    project?.posterUrl && isImageAssetUrl(project.posterUrl)
       ? project.posterUrl
-      : isImageUrl(project?.coverImage)
+      : isImageAssetUrl(project?.coverImage)
       ? (project?.coverImage || '/assets/work/nelson-diamond.png')
       : '/assets/work/nelson-diamond.png';
 
   const getMediaDisplaySrc = (item?: GalleryMediaItem): string => {
     if (!item) return project?.coverImage || '/assets/work/nelson-diamond.png';
     if (item.type === 'video') {
-      if (item.poster && isImageUrl(item.poster)) return item.poster;
-      if (project?.posterUrl && isImageUrl(project.posterUrl)) return project.posterUrl;
-      if (project?.coverImage && isImageUrl(project.coverImage)) return project.coverImage;
+      if (item.poster && isImageAssetUrl(item.poster)) return item.poster;
+      if (project?.posterUrl && isImageAssetUrl(project.posterUrl)) return project.posterUrl;
+      if (project?.coverImage && isImageAssetUrl(project.coverImage)) return project.coverImage;
       return '/assets/work/nelson-diamond.png';
     }
-    // For images, the URL is the image visual; fallback to poster or project cover
-    if (item.url && isImageUrl(item.url)) return item.url;
-    if (item.poster && isImageUrl(item.poster)) return item.poster;
+    if (item.url && isImageAssetUrl(item.url)) return item.url;
+    if (item.poster && isImageAssetUrl(item.poster)) return item.poster;
     return project?.coverImage || '/assets/work/nelson-diamond.png';
   };
 
   const galleryItems: GalleryMediaItem[] =
     project?.gallery && project.gallery.length > 0
       ? project.gallery.map((g, i) => {
-          const isItemVideo = g.type === 'video' || isVideoUrl(g.url);
-          const validVideoSrc: string = (isVideoUrl(g.url) ? g.url : defaultVideoUrl) || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4';
-          const validImgSrc: string = (isImageUrl(g.url)
-            ? g.url
-            : isImageUrl(g.poster)
-            ? g.poster
-            : defaultPosterUrl) || defaultPosterUrl;
+          // Guard against image URLs accidentally tagged as 'video'
+          const isItemVideo =
+            isVideoAssetUrl(g.url) || (g.type === 'video' && !isImageAssetUrl(g.url));
+          const validVideoSrc: string =
+            (isVideoAssetUrl(g.url) ? g.url : defaultVideoUrl) || '/assets/nira-loop.mp4';
+          const validImgSrc: string =
+            (isImageAssetUrl(g.url)
+              ? g.url
+              : isImageAssetUrl(g.poster)
+              ? g.poster
+              : defaultPosterUrl) || defaultPosterUrl;
 
           return {
             ...g,
             id: g.id || `media-${i}`,
             type: isItemVideo ? 'video' : 'image',
             url: isItemVideo ? validVideoSrc : validImgSrc,
-            poster: isItemVideo ? (isImageUrl(g.poster) ? g.poster : defaultPosterUrl) : validImgSrc,
-            aspectRatio: '9:16',
+            poster: isItemVideo ? (isImageAssetUrl(g.poster) ? g.poster : defaultPosterUrl) : validImgSrc,
+            aspectRatio: g.aspectRatio && g.aspectRatio !== 'auto' ? g.aspectRatio : '9:16',
           };
         })
       : project?.thumbnails && project.thumbnails.length > 0
@@ -176,20 +159,20 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           const isFirstVideo = !!project?.hasVideo && i === 0;
           return {
             id: `media-${i}`,
-            url: isFirstVideo ? defaultVideoUrl || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : url,
+            url: isFirstVideo ? defaultVideoUrl : url,
             type: isFirstVideo ? 'video' : 'image',
             aspectRatio: '9:16',
             fit: project?.coverFit || 'cover',
             focalPoint: project?.coverFocalPoint || 'center',
             caption: `${project?.title || 'Project'} - Asset 0${i + 1}`,
-            poster: isImageUrl(url) ? url : defaultPosterUrl,
+            poster: isImageAssetUrl(url) ? url : defaultPosterUrl,
           };
         })
       : project
       ? [
           {
             id: 'fallback-media',
-            url: project.hasVideo ? defaultVideoUrl || '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4' : defaultPosterUrl,
+            url: project.hasVideo ? defaultVideoUrl : defaultPosterUrl,
             type: project.hasVideo ? 'video' : 'image',
             aspectRatio: '9:16',
             fit: project.coverFit || 'cover',
@@ -237,7 +220,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           setVideoError(false);
         })
         .catch(() => {
-          // If unmuted playback was rejected by browser, mute and play
           if (videoRef.current) {
             videoRef.current.muted = true;
             setIsMuted(true);
@@ -255,11 +237,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
-  // Keyboard navigation
   useEffect(() => {
     if (!project) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
         return;
       }
@@ -299,11 +279,52 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   const currentMedia = galleryItems[activeMediaIndex] || {
     url: project.coverImage,
-    type: 'image',
-    fit: 'cover',
-    focalPoint: 'center',
-    aspectRatio: '9:16',
+    type: 'image' as const,
+    fit: 'cover' as const,
+    focalPoint: 'center' as const,
+    aspectRatio: '9:16' as const,
   };
+
+  const resolvedMedia = resolveMediaForDevice(
+    device,
+    {
+      aspectRatio: currentMedia.aspectRatio || '9:16',
+      fit: currentMedia.fit || project.coverFit || 'cover',
+      focalPoint: currentMedia.focalPoint || project.coverFocalPoint || 'center',
+    },
+    currentMedia.responsiveMedia,
+    {
+      mobile: {
+        aspectRatio:
+          currentMedia.aspectRatio && currentMedia.aspectRatio !== 'auto'
+            ? currentMedia.aspectRatio
+            : '3:4',
+      },
+      tablet: {
+        aspectRatio:
+          currentMedia.aspectRatio && currentMedia.aspectRatio !== 'auto'
+            ? currentMedia.aspectRatio
+            : '4:5',
+      },
+      laptop: {
+        aspectRatio:
+          currentMedia.aspectRatio && currentMedia.aspectRatio !== 'auto'
+            ? currentMedia.aspectRatio
+            : '9:16',
+      },
+    }
+  );
+
+  const isLandscapeAspect = ['16:9', '16:10', '3:2', '4:3'].includes(resolvedMedia.aspectRatio);
+  const theaterViewportClass = getAspectRatioClass(resolvedMedia.aspectRatio);
+  const fitClass = resolvedMedia.fit === 'contain' ? 'object-contain bg-black' : 'object-cover';
+  const focalClass = getFocalClass(resolvedMedia.focalPoint);
+
+  const viewportWidthLimit = isLandscapeAspect
+    ? 'w-full max-w-[540px]'
+    : device === 'mobile'
+    ? 'w-full max-w-[270px] max-h-[50dvh]'
+    : 'w-full max-w-[340px] sm:max-w-[360px] max-h-[70vh]';
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -331,27 +352,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       videoRef.current.src &&
       !videoRef.current.src.endsWith('/assets/nira-loop.mp4')
     ) {
-      // Gracefully recover to SGS showcase reel if uploaded video URL or blob expired
       videoRef.current.src = '/assets/nira-loop.mp4';
       videoRef.current.load();
       setVideoError(false);
     } else {
       setVideoError(true);
-    }
-  };
-
-  const getFocalClass = (f?: string) => {
-    switch (f) {
-      case 'top':
-        return 'object-top';
-      case 'bottom':
-        return 'object-bottom';
-      case 'left':
-        return 'object-left';
-      case 'right':
-        return 'object-right';
-      default:
-        return 'object-center';
     }
   };
 
@@ -362,35 +367,48 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
-      className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-6 bg-black/90 backdrop-blur-md animate-in fade-in duration-200"
+      className={`fixed inset-0 z-[100] flex ${
+        device === 'mobile' ? 'items-end justify-center p-0' : 'items-center justify-center p-3 sm:p-6'
+      } bg-black/90 backdrop-blur-md animate-in fade-in duration-200`}
       onClick={onClose}
     >
       <div
         ref={containerRef}
         tabIndex={-1}
-        className={`relative w-full rounded-2xl border border-white/10 bg-[#101318] text-white shadow-2xl transition-all focus:outline-none ${
+        className={`relative w-full border border-white/10 bg-[#101318] text-white shadow-2xl transition-all focus:outline-none overflow-y-auto ${
           isFullscreen
-            ? 'fixed inset-0 max-w-none max-h-none h-full w-full rounded-none overflow-y-auto'
-            : 'max-w-6xl max-h-[94vh] overflow-y-auto'
+            ? 'fixed inset-0 max-w-none max-h-none h-full rounded-none'
+            : device === 'mobile'
+            ? 'max-h-[92dvh] rounded-t-2xl'
+            : 'max-w-6xl max-h-[92vh] rounded-2xl'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Breadcrumb Bar */}
-        <div className="flex items-center justify-between border-b border-white/[0.08] px-6 py-4 bg-[#0F1218] sticky top-0 z-30">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-[#94A3B8]">
-            <span className="font-bold text-white">SGS AI GROUP</span>
+        <div
+          className={`flex items-center justify-between border-b border-white/[0.08] ${
+            device === 'mobile' ? 'px-4 py-3' : 'px-6 py-4'
+          } bg-[#0F1218] sticky top-0 z-30`}
+        >
+          <div className="flex items-center gap-2 text-[10px] sm:text-xs uppercase tracking-widest text-[#94A3B8] min-w-0 truncate">
+            <span className="font-bold text-white shrink-0">SGS AI GROUP</span>
             <span>/</span>
-            <span>SELECTED WORK</span>
-            <span className="hidden sm:inline">/</span>
-            <span className="hidden sm:inline text-white/50">{project.categoryLabel}</span>
+            <span className="truncate">SELECTED WORK</span>
+            {device !== 'mobile' && (
+              <>
+                <span>/</span>
+                <span className="text-white/50 truncate">{project.categoryLabel}</span>
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsFullscreen(!isFullscreen)}
               title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen View (F)'}
-              className="flex size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen View'}
+              className="flex size-10 sm:size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
             >
               {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </button>
@@ -398,7 +416,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close project modal (Esc)"
-              className="flex size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
+              className="flex size-10 sm:size-8 items-center justify-center rounded-full text-[#94A3B8] hover:bg-white/10 hover:text-white transition cursor-pointer"
             >
               <X className="size-5" />
             </button>
@@ -406,11 +424,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         </div>
 
         {/* Modal Main Grid */}
-        <div className="grid gap-8 p-6 lg:p-8 lg:grid-cols-12 items-start">
-          {/* Left Column: 9:16 Vertical Media Theater */}
-          <div className="lg:col-span-6 flex flex-col items-center justify-between">
-            {/* Ambient Cinema Stage for 9:16 Vertical Media */}
-            <div className="relative w-full overflow-hidden rounded-2xl bg-black border border-white/10 shadow-2xl flex items-center justify-center p-3 sm:p-4 min-h-[460px] sm:min-h-[540px]">
+        <div
+          className={`grid ${
+            device === 'laptop'
+              ? 'gap-8 p-6 lg:p-8 grid-cols-12 items-start'
+              : device === 'tablet'
+              ? 'gap-6 p-6 grid-cols-1'
+              : 'gap-5 p-4 grid-cols-1'
+          }`}
+        >
+          {/* Left / Top Column: Adaptive Media Theater */}
+          <div className={`${device === 'laptop' ? 'col-span-6' : ''} flex flex-col items-center justify-between`}>
+            <div
+              className={`relative w-full overflow-hidden rounded-2xl bg-black border border-white/10 shadow-2xl flex items-center justify-center ${
+                device === 'mobile' ? 'p-3 min-h-[300px]' : 'p-4 min-h-[420px] sm:min-h-[500px]'
+              }`}
+            >
               {/* Subtle Ambient Blurred Backdrop */}
               <div
                 className="absolute inset-0 scale-150 opacity-25 blur-3xl pointer-events-none select-none bg-cover bg-center"
@@ -418,9 +447,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 aria-hidden="true"
               />
 
-              {/* Centered 9:16 Mobile-First Vertical Theater Viewport */}
-              <div className="relative aspect-[9/16] w-full max-w-[340px] sm:max-w-[360px] max-h-[72vh] overflow-hidden rounded-xl bg-neutral-950 border border-white/15 shadow-2xl group/media">
-                {/* Media Renderer: Video vs Image */}
+              {/* Centered Device-Adaptive Theater Viewport */}
+              <div
+                className={`relative ${theaterViewportClass} ${viewportWidthLimit} overflow-hidden rounded-xl bg-neutral-950 border border-white/15 shadow-2xl group/media`}
+              >
                 {currentMedia.type === 'video' ? (
                   <div className="relative h-full w-full flex items-center justify-center bg-black">
                     {videoError ? (
@@ -428,7 +458,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                         <Video className="size-10 text-white/30 mb-2" />
                         <p className="text-xs font-semibold text-white">Video stream unavailable</p>
                         <p className="text-[11px] text-white/50 max-w-xs mt-1">
-                          Showing 9:16 poster cover.
+                          Showing poster cover.
                         </p>
                         <img
                           src={activePoster}
@@ -447,7 +477,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                                 videoRef.current.play().then(() => setIsPlayingVideo(true)).catch(() => setVideoError(true));
                               }
                             }}
-                            className="px-3 py-1.5 rounded-full bg-[#2563EB] text-[11px] text-white font-medium hover:bg-[#1D4ED8] cursor-pointer shadow"
+                            className="px-3 py-2 rounded-full bg-[#2563EB] text-[11px] text-white font-medium hover:bg-[#1D4ED8] cursor-pointer shadow"
                           >
                             Load SGS Showcase Reel
                           </button>
@@ -461,7 +491,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                           src={currentMedia.url}
                           poster={activePoster}
                           preload="metadata"
-                          className={`h-full w-full object-cover ${getFocalClass(currentMedia.focalPoint)}`}
+                          className={`h-full w-full ${fitClass} ${focalClass}`}
                           muted={isMuted}
                           playsInline
                           onTimeUpdate={handleTimeUpdate}
@@ -484,7 +514,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                                 setIsMuted(false);
                               }
                             }}
-                            className="absolute top-3 right-3 z-30 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/75 hover:bg-black text-white text-[10px] font-mono border border-white/20 backdrop-blur shadow cursor-pointer transition hover:scale-105"
+                            className="absolute top-3 right-3 z-30 flex items-center gap-1.5 px-3 py-1.5 min-h-[32px] rounded-full bg-black/75 hover:bg-black text-white text-[10px] font-mono border border-white/20 backdrop-blur shadow cursor-pointer transition hover:scale-105"
                           >
                             <VolumeX className="size-3 text-amber-400" />
                             <span>Tap for sound</span>
@@ -504,12 +534,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                         )}
 
                         {/* Video Controls Bar */}
-                        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 flex items-center gap-3 z-20 opacity-0 group-hover/media:opacity-100 transition-opacity duration-200">
+                        <div
+                          className={`absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-3 flex items-center gap-3 z-20 transition-opacity duration-200 ${
+                            device === 'laptop' ? 'opacity-0 group-hover/media:opacity-100' : 'opacity-100'
+                          }`}
+                        >
                           <button
                             type="button"
                             onClick={toggleVideoPlayback}
                             aria-label={isPlayingVideo ? 'Pause' : 'Play'}
-                            className="text-white hover:text-[#38BDF8] transition cursor-pointer"
+                            className="text-white hover:text-[#38BDF8] transition cursor-pointer p-1"
                           >
                             {isPlayingVideo ? <Pause className="size-4" /> : <Play className="size-4" />}
                           </button>
@@ -517,7 +551,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                           {/* Progress Scrubber */}
                           <div
                             onClick={handleScrub}
-                            className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
+                            className="flex-1 h-2 bg-white/20 rounded-full overflow-hidden cursor-pointer relative"
                           >
                             <div
                               className="h-full bg-[#2563EB] transition-all"
@@ -534,7 +568,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                               }
                             }}
                             aria-label={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-                            className="text-white hover:text-[#38BDF8] transition cursor-pointer"
+                            className="text-white hover:text-[#38BDF8] transition cursor-pointer p-1"
                           >
                             {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
                           </button>
@@ -543,16 +577,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     )}
                   </div>
                 ) : (
-                  /* 9:16 Vertical Poster Visual */
                   <div className="relative h-full w-full flex items-center justify-center bg-black">
                     <img
                       key={`modal-img-${currentMedia.id || activeMediaIndex}-${getMediaDisplaySrc(currentMedia)}`}
                       src={getMediaDisplaySrc(currentMedia)}
                       alt={`${project.title} asset 0${activeMediaIndex + 1}`}
                       onError={handleImageError}
-                      className={`h-full w-full select-none ${
-                        currentMedia.fit === 'contain' ? 'object-contain' : 'object-cover'
-                      } ${getFocalClass(currentMedia.focalPoint)}`}
+                      className={`h-full w-full select-none ${fitClass} ${focalClass}`}
                     />
                   </div>
                 )}
@@ -564,7 +595,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                       type="button"
                       onClick={handlePrevMedia}
                       aria-label="Previous gallery asset (Left Arrow)"
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-10 sm:size-9 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
                     >
                       <ChevronLeft className="size-4" />
                     </button>
@@ -572,7 +603,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                       type="button"
                       onClick={handleNextMedia}
                       aria-label="Next gallery asset (Right Arrow)"
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-10 sm:size-9 items-center justify-center rounded-full bg-black/70 text-white hover:bg-[#2563EB] transition-colors border border-white/20 cursor-pointer z-10"
                     >
                       <ChevronRight className="size-4" />
                     </button>
@@ -582,10 +613,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 {/* Aspect Ratio Badge & Caption */}
                 <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
                   <span className="rounded bg-black/80 px-2 py-0.5 text-[10px] font-mono text-[#38BDF8] backdrop-blur border border-white/10 uppercase">
-                    9:16 · {currentMedia.type}
+                    {resolvedMedia.aspectRatio} · {currentMedia.type}
                   </span>
-                  {currentMedia.caption && (
-                    <span className="hidden sm:inline rounded bg-black/70 px-2 py-0.5 text-[10px] text-white/80 backdrop-blur truncate max-w-[140px]">
+                  {device !== 'mobile' && currentMedia.caption && (
+                    <span className="rounded bg-black/70 px-2 py-0.5 text-[10px] text-white/80 backdrop-blur truncate max-w-[140px]">
                       {currentMedia.caption}
                     </span>
                   )}
@@ -593,8 +624,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               </div>
             </div>
 
-            {/* 9:16 Vertical Filmstrip Thumbnails */}
-            <div className="mt-4 flex items-center gap-2 overflow-x-auto w-full pb-2 no-scrollbar justify-start sm:justify-center">
+            {/* Filmstrip Thumbnails */}
+            <div className="mt-3 sm:mt-4 flex items-center gap-2 overflow-x-auto w-full pb-2 no-scrollbar justify-start sm:justify-center">
               {galleryItems.map((thumb, idx) => {
                 const isSelected = activeMediaIndex === idx;
                 const thumbImg = getMediaDisplaySrc(thumb);
@@ -612,7 +643,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                         videoRef.current.currentTime = 0;
                       }
                     }}
-                    className={`relative aspect-[9/16] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border transition-all cursor-pointer bg-black ${
+                    className={`relative aspect-[3/4] sm:aspect-[9/16] w-12 sm:w-14 shrink-0 overflow-hidden rounded-lg border transition-all cursor-pointer bg-black ${
                       isSelected
                         ? 'border-[#2563EB] ring-2 ring-[#2563EB]/50 scale-105'
                         : 'border-white/15 opacity-60 hover:opacity-100'
@@ -630,17 +661,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                         <Play className="size-3 fill-white text-white" />
                       </div>
                     )}
-                    <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[7px] font-mono text-[#38BDF8]">
-                      9:16
-                    </span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Right Column: Case Study Dossier */}
-          <div className="lg:col-span-6 flex flex-col justify-between space-y-6">
+          {/* Right / Bottom Column: Case Study Dossier */}
+          <div className={`${device === 'laptop' ? 'col-span-6' : ''} flex flex-col justify-between space-y-5 sm:space-y-6`}>
             <div>
               {/* Category & Pagination Counter */}
               <div className="flex items-center justify-between text-xs uppercase tracking-widest text-[#94A3B8]">
@@ -661,7 +689,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               {/* Title & Subtitle */}
               <h3
                 id="modal-title"
-                className="mt-3 font-display text-2xl sm:text-3xl font-bold leading-tight text-white tracking-[-0.02em]"
+                className={`mt-3 font-display ${
+                  device === 'mobile' ? 'text-xl' : 'text-2xl sm:text-3xl'
+                } font-bold leading-tight text-white tracking-[-0.02em]`}
               >
                 {project.title}
               </h3>
@@ -669,8 +699,12 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 {project.subtitle}
               </p>
 
-              {/* Dossier 4 Key Points matching Approved Mockup */}
-              <div className="mt-6 space-y-4 text-xs border-t border-white/[0.08] pt-4">
+              {/* Dossier 4 Key Points: 2-column grid on tablet for compact reading */}
+              <div
+                className={`mt-5 sm:mt-6 border-t border-white/[0.08] pt-4 text-xs ${
+                  device === 'tablet' ? 'grid grid-cols-2 gap-5' : 'space-y-4'
+                }`}
+              >
                 <div>
                   <h4 className="font-bold text-white uppercase tracking-wider text-[11px] mb-1">
                     The Challenge
@@ -718,7 +752,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 <button
                   type="button"
                   onClick={handlePrevProject}
-                  className="flex items-center gap-1.5 text-xs text-[#94A3B8] hover:text-white transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-2 min-h-[42px] text-xs text-[#94A3B8] hover:text-white transition cursor-pointer"
                 >
                   <ArrowLeft className="size-3.5" />
                   <span>Previous</span>
@@ -727,7 +761,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 <button
                   type="button"
                   onClick={handleNextProject}
-                  className="flex items-center gap-2 rounded-full bg-[#2563EB] hover:bg-[#1D4ED8] px-5 py-2 text-xs font-bold text-white transition-all shadow-lg shadow-[#2563EB]/25 cursor-pointer"
+                  className="flex items-center gap-2 rounded-full bg-[#2563EB] hover:bg-[#1D4ED8] px-5 py-2.5 min-h-[42px] text-xs font-bold text-white transition-all shadow-lg shadow-[#2563EB]/25 cursor-pointer"
                 >
                   <span>Next Project</span>
                   <ArrowRight className="size-3.5" />

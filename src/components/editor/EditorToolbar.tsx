@@ -16,6 +16,8 @@ import {
   Minimize2,
   RotateCcw,
   SlidersHorizontal,
+  Check,
+  RefreshCw,
 } from 'lucide-react';
 import { ExportModal } from './ExportModal.tsx';
 
@@ -44,18 +46,45 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     undo,
     redo,
     saveDraft,
+    saveToServer,
+    saveStatus,
+    lastSavedAt,
     resetToDefaults,
+    publishToCodebase,
+    syncWithCodebase,
   } = useSiteContent();
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
+  const [isPublishingLive, setIsPublishingLive] = useState(false);
+  const [publishLiveToast, setPublishLiveToast] = useState<string | null>(null);
 
   if (!isAuthorized || !isEditorOpen) return null;
 
-  const handleManualSave = () => {
-    saveDraft();
+  const handleManualSave = async () => {
     setSaveToast(true);
+    await saveDraft();
     setTimeout(() => setSaveToast(false), 2000);
+  };
+
+  const handleDirectPublishLive = async () => {
+    setIsPublishingLive(true);
+    setPublishLiveToast(null);
+    try {
+      const res = await publishToCodebase();
+      setIsPublishingLive(false);
+      if (res.success) {
+        setPublishLiveToast('Live 24/7 on Site!');
+        setTimeout(() => setPublishLiveToast(null), 3000);
+      } else {
+        setPublishLiveToast('Publish Error');
+        setTimeout(() => setPublishLiveToast(null), 3000);
+      }
+    } catch {
+      setIsPublishingLive(false);
+      setPublishLiveToast('Failed');
+      setTimeout(() => setPublishLiveToast(null), 2500);
+    }
   };
 
   const tabs: { id: EditorTab; label: string }[] = [
@@ -83,58 +112,74 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
           <div className="h-4 w-[1px] bg-white/10 hidden sm:block" />
 
-          {/* Draft indicator */}
+          {/* 24/7 Live Server Auto-Save indicator */}
           <div className="flex items-center gap-1.5 text-[11px] font-mono">
-            <span
-              className={`size-2 rounded-full ${
-                isDraft ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
-              }`}
-            />
-            <span className="text-white/60 hidden md:inline">
-              {isDraft ? 'Draft Edits Active' : 'Clean / Synced'}
-            </span>
+            {saveStatus === 'saving' ? (
+              <>
+                <RefreshCw className="size-3 text-sky-400 animate-spin" />
+                <span className="text-sky-300 hidden md:inline">Syncing to Server...</span>
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <span className="size-2 rounded-full bg-rose-500 animate-pulse" />
+                <span className="text-rose-300 hidden md:inline">Save Error</span>
+              </>
+            ) : (
+              <>
+                <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                <span className="text-emerald-300 hidden md:inline">
+                  24/7 Live Saved
+                </span>
+              </>
+            )}
           </div>
         </div>
 
         {/* Center: Device Preview Switcher & Section Tabs */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Device Switcher */}
-          <div className="flex items-center rounded-lg bg-black/50 p-0.5 border border-white/10">
+          <div className="flex items-center rounded-lg bg-black/50 p-0.5 border border-white/10" role="group" aria-label="Device preview">
             <button
               type="button"
               onClick={() => setPreviewDevice('desktop')}
-              title="Desktop Preview (100%)"
-              className={`p-1.5 rounded-md transition ${
+              title="Laptop Preview (100%)"
+              aria-label="Laptop preview"
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
                 previewDevice === 'desktop'
                   ? 'bg-[#2563EB] text-white shadow-sm'
                   : 'text-white/50 hover:text-white'
               }`}
             >
               <Monitor className="size-3.5" />
+              <span className="hidden md:inline">Laptop</span>
             </button>
             <button
               type="button"
               onClick={() => setPreviewDevice('tablet')}
               title="Tablet Preview (768px)"
-              className={`p-1.5 rounded-md transition ${
+              aria-label="Tablet preview"
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
                 previewDevice === 'tablet'
                   ? 'bg-[#2563EB] text-white shadow-sm'
                   : 'text-white/50 hover:text-white'
               }`}
             >
               <Tablet className="size-3.5" />
+              <span className="hidden md:inline">Tablet</span>
             </button>
             <button
               type="button"
               onClick={() => setPreviewDevice('mobile')}
-              title="Mobile Preview (375px)"
-              className={`p-1.5 rounded-md transition ${
+              title="Mobile Preview (390px)"
+              aria-label="Mobile preview"
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
                 previewDevice === 'mobile'
                   ? 'bg-[#2563EB] text-white shadow-sm'
                   : 'text-white/50 hover:text-white'
               }`}
             >
               <Smartphone className="size-3.5" />
+              <span className="hidden md:inline">Mobile</span>
             </button>
           </div>
 
@@ -215,6 +260,19 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <span className="hidden sm:inline">{isDrawerOpen ? 'Hide Editor' : 'Edit Section'}</span>
           </button>
 
+          {/* Sync to Codebase Default if Draft is Active */}
+          {isDraft && (
+            <button
+              type="button"
+              onClick={syncWithCodebase}
+              title="Reset local draft back to published codebase"
+              className="hidden lg:flex items-center gap-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2 py-1 text-[11px] font-semibold text-amber-300 transition cursor-pointer"
+            >
+              <RotateCcw className="size-3" />
+              <span>Sync Live Site</span>
+            </button>
+          )}
+
           {/* Save Draft */}
           <button
             type="button"
@@ -226,14 +284,38 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <span className="hidden sm:inline">{saveToast ? 'Saved!' : 'Save'}</span>
           </button>
 
-          {/* Publish / Export */}
+          {/* Direct 1-Click Publish Live to Codebase */}
+          <button
+            type="button"
+            onClick={handleDirectPublishLive}
+            disabled={isPublishingLive}
+            title="Publish all active edits live to server file (all visitors & devices will see it immediately)"
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-lg transition cursor-pointer ${
+              publishLiveToast
+                ? 'bg-emerald-600 shadow-emerald-500/25'
+                : 'bg-[#2563EB] hover:bg-[#1D4ED8] shadow-[#2563EB]/25'
+            }`}
+          >
+            {isPublishingLive ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : publishLiveToast ? (
+              <Check className="size-3.5 text-white" />
+            ) : (
+              <Sparkles className="size-3.5 text-sky-200" />
+            )}
+            <span>
+              {isPublishingLive ? 'Publishing...' : publishLiveToast || 'Publish Live'}
+            </span>
+          </button>
+
+          {/* More Export Options */}
           <button
             type="button"
             onClick={() => setIsExportOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-[#2563EB]/25 transition cursor-pointer"
+            title="More export & backup options (.ts / .json)"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition cursor-pointer"
           >
             <Download className="size-3.5" />
-            <span>Publish</span>
           </button>
 
           {/* Exit / Close */}

@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useSiteContent } from '../context/ContentContext.tsx';
-import { Lock, Unlock, Sliders } from 'lucide-react';
+import { Lock, Sliders } from 'lucide-react';
+import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
 
 export const Footer: React.FC = () => {
   const {
     siteData,
     isAuthorized,
-    isEditorOpen,
     toggleEditor,
     authorize,
   } = useSiteContent();
+  const device = useEffectiveDevice();
   const config = siteData.config;
   const navLinks = siteData.navLinks;
   const contact = siteData.contact;
@@ -37,11 +38,22 @@ export const Footer: React.FC = () => {
     }
   };
 
+  const gridClass =
+    device === 'laptop'
+      ? 'grid-cols-12 gap-12 py-16 px-6 lg:px-8'
+      : device === 'tablet'
+      ? 'grid-cols-2 gap-10 py-14 px-6'
+      : 'grid-cols-1 gap-8 py-12 px-5';
+
   return (
     <footer className="relative bg-[#101318] text-white border-t border-white/[0.08]">
-      <div className="mx-auto grid max-w-7xl gap-12 px-6 lg:px-8 py-16 md:grid-cols-12">
+      <div className={`mx-auto grid max-w-7xl ${gridClass}`}>
         {/* Brand Architecture Column */}
-        <div className="md:col-span-5 flex flex-col justify-between">
+        <div
+          className={`${
+            device === 'laptop' ? 'col-span-5' : device === 'tablet' ? 'col-span-2' : ''
+          } flex flex-col justify-between`}
+        >
           <div>
             <a
               href="#home"
@@ -57,12 +69,12 @@ export const Footer: React.FC = () => {
               />
             </a>
 
-            <p className="mt-5 max-w-sm text-sm leading-relaxed text-[#94A3B8]">
+            <p className="mt-4 sm:mt-5 max-w-sm text-sm leading-relaxed text-[#94A3B8]">
               {contact.footerTagline}
             </p>
           </div>
 
-          <div className="mt-8 pt-5 border-t border-white/[0.06]">
+          <div className="mt-6 sm:mt-8 pt-5 border-t border-white/[0.06]">
             <p className="text-xs uppercase tracking-[0.16em] text-[#2563EB] font-bold">
               {config.philosophy}
             </p>
@@ -73,12 +85,17 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Footer Navigation matching Mockup */}
-        <nav className="grid grid-cols-2 gap-3 text-sm md:col-span-4" aria-label="Footer Navigation">
+        <nav
+          className={`grid grid-cols-2 gap-2.5 sm:gap-3 text-sm ${
+            device === 'laptop' ? 'col-span-4' : ''
+          }`}
+          aria-label="Footer Navigation"
+        >
           {navLinks.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              className="text-[#94A3B8] hover:text-white transition-colors py-1"
+              className="text-[#94A3B8] hover:text-white transition-colors py-2 min-h-[40px] flex items-center"
             >
               {item.label}
             </a>
@@ -86,13 +103,17 @@ export const Footer: React.FC = () => {
         </nav>
 
         {/* Contact Quick Information */}
-        <div className="text-sm text-[#94A3B8] md:col-span-3 space-y-2">
+        <div
+          className={`text-sm text-[#94A3B8] ${
+            device === 'laptop' ? 'col-span-3' : ''
+          } space-y-2`}
+        >
           <p className="text-xs uppercase tracking-wider text-white font-bold mb-3">
             Regional Presence
           </p>
           <a
             href={`mailto:${config.email}`}
-            className="text-white hover:text-[#2563EB] transition-colors block font-semibold"
+            className="text-white hover:text-[#2563EB] transition-colors block font-semibold break-all"
           >
             {config.email}
           </a>
@@ -106,8 +127,12 @@ export const Footer: React.FC = () => {
       </div>
 
       {/* Copyright Bar & Discreet Private CMS Trigger */}
-      <div className="border-t border-white/[0.06] bg-[#0C0E12] py-6 text-xs text-[#94A3B8]">
-        <div className="mx-auto max-w-7xl px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="border-t border-white/[0.06] bg-[#0C0E12] py-5 sm:py-6 text-xs text-[#94A3B8]">
+        <div
+          className={`mx-auto max-w-7xl ${
+            device === 'mobile' ? 'px-5 flex-col items-start' : 'px-6 lg:px-8 flex-row items-center justify-between'
+          } flex gap-3`}
+        >
           <p>{config.copyright}</p>
 
           <div className="flex items-center gap-4">
@@ -121,7 +146,7 @@ export const Footer: React.FC = () => {
               onClick={handleAdminClick}
               title="Private Website Content & Design Editor (Ctrl+Shift+E)"
               aria-label="Private Website Content & Design Editor"
-              className="p-1 rounded text-[#475569] hover:text-[#94A3B8] transition cursor-pointer"
+              className="p-2 rounded text-[#475569] hover:text-[#94A3B8] transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
             >
               {isAuthorized ? (
                 <Sliders className="size-3.5 text-[#2563EB]" />
@@ -149,7 +174,7 @@ export const Footer: React.FC = () => {
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 placeholder="Passcode (default: sgs2026)"
-                className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-sm text-white focus:border-[#2563EB] focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2.5 min-h-[44px] text-base sm:text-sm text-white focus:border-[#2563EB] focus:outline-none"
               />
 
               {errorMsg && (
@@ -160,13 +185,13 @@ export const Footer: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setPromptOpen(false)}
-                  className="rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white"
+                  className="rounded-lg px-3 py-2 min-h-[40px] text-xs text-white/60 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-4 py-1.5 text-xs font-semibold text-white"
+                  className="rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-4 py-2 min-h-[40px] text-xs font-semibold text-white cursor-pointer"
                 >
                   Unlock CMS
                 </button>

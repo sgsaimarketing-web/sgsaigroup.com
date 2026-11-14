@@ -2,6 +2,7 @@ import React from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { Mail, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { ContactDetail } from '../../data/siteContent.ts';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
 
 export const ContactEditor: React.FC = () => {
   const { siteData, updateContact, updateConfig } = useSiteContent();
@@ -98,6 +99,13 @@ export const ContactEditor: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Per-Device Layout Controls */}
+      <DeviceLayoutControl
+        title="Section 06 Layout by Device"
+        value={contact.responsiveLayout}
+        onChange={(next) => updateContact({ responsiveLayout: next })}
+      />
 
       {/* Verified Contact Details Channels */}
       <div className="space-y-4">

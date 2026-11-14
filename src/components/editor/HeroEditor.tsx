@@ -1,7 +1,8 @@
 import React from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { MediaControl } from './MediaControl.tsx';
-import { Sparkles, Type, Film } from 'lucide-react';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
+import { Sparkles, Type } from 'lucide-react';
 
 export const HeroEditor: React.FC = () => {
   const { siteData, updateHero } = useSiteContent();
@@ -147,19 +148,29 @@ export const HeroEditor: React.FC = () => {
       {/* Hero Media & Visual Atmosphere */}
       <MediaControl
         label="NIRA Hero Visual or Video"
-        url={hero.backgroundImage || siteData.config.heroImage}
+        url={hero.backgroundVideo || hero.backgroundImage || siteData.config.heroImage}
         mediaType={hero.backgroundVideo ? 'video' : 'image'}
         fit={hero.backgroundFit || 'cover'}
         focalPoint={hero.backgroundFocalPoint || 'center'}
         aspectRatio="16:9"
+        responsiveMedia={hero.responsiveMedia}
+        onResponsiveChange={(next) => updateHero({ responsiveMedia: next })}
+        showHeightScale={true}
         onChange={(patch) => {
           updateHero({
-            backgroundImage: patch.url,
-            backgroundVideo: patch.type === 'video' ? patch.url : undefined,
-            backgroundFit: patch.fit,
-            backgroundFocalPoint: patch.focalPoint,
+            backgroundImage: patch.type === 'video' ? hero.backgroundImage : (patch.url ?? hero.backgroundImage),
+            backgroundVideo: patch.type === 'video' ? (patch.url ?? hero.backgroundVideo) : undefined,
+            backgroundFit: patch.fit ?? hero.backgroundFit,
+            backgroundFocalPoint: patch.focalPoint ?? hero.backgroundFocalPoint,
           });
         }}
+      />
+
+      {/* Device Layout & Spacing Controls */}
+      <DeviceLayoutControl
+        title="Hero Layout & Spacing by Device"
+        value={hero.responsiveLayout}
+        onChange={(next) => updateHero({ responsiveLayout: next })}
       />
 
       {/* Animation Dynamics */}

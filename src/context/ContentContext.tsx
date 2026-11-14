@@ -30,8 +30,16 @@ import {
   safeSetLocalStorage,
 } from '../utils/draftStorage.ts';
 
-const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v2';
+export const CODEBASE_CONTENT_VERSION = '2026-11-11-v5-biho-alzara-mykaapie';
+const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v5';
+const VERSION_STORAGE_KEY = 'sgs_content_version_stamp';
 const AUTH_STORAGE_KEY = 'sgs_editor_authorized_v2';
+const LEGACY_STORAGE_KEYS = [
+  'sgs_site_content_draft_v1',
+  'sgs_site_content_draft_v2',
+  'sgs_site_content_draft_v3',
+  'sgs_site_content_draft_v4',
+];
 
 export const DEFAULT_SITE_DATA: SiteData = {
   config: SITE_CONFIG,
@@ -68,6 +76,8 @@ export function sanitizeCaseStudies(studies: CaseStudy[]): CaseStudy[] {
   });
 }
 
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
 export type EditorTab =
   | 'hero'
   | 'whoweare'
@@ -92,6 +102,8 @@ interface ContentContextType {
   isDraft: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  saveStatus: SaveStatus;
+  lastSavedAt: Date | null;
   // Controls
   openEditor: (tab?: EditorTab, projectId?: string | null) => void;
   closeEditor: () => void;
@@ -119,6 +131,7 @@ interface ContentContextType {
   undo: () => void;
   redo: () => void;
   saveDraft: () => void;
+  saveToServer: () => Promise<{ success: boolean; message: string }>;
   resetToDefaults: () => void;
   discardDraft: () => void;
   exportTypeScriptCode: () => string;
@@ -126,6 +139,7 @@ interface ContentContextType {
   importJsonCode: (jsonStr: string) => { success: boolean; error?: string };
   publishToCodebase: () => Promise<{ success: boolean; message: string; bytes?: number }>;
   saveProjectVideoBlob: (projectId: string, blob: Blob) => Promise<string>;
+  syncWithCodebase: () => void;
 }
 
 const ContentContext = createContext<ContentContextType | null>(null);
@@ -144,31 +158,10 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return hasParam || hasStoredAuth;
   });
 
-  // Load draft from localStorage if present
-  const [siteData, setSiteDataState] = useState<SiteData>(() => {
-    if (typeof window === 'undefined') return DEFAULT_SITE_DATA;
-    try {
-      const stored = localStorage.getItem(DRAFT_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return {
-          ...DEFAULT_SITE_DATA,
-          ...parsed,
-          config: { ...DEFAULT_SITE_DATA.config, ...(parsed.config || {}) },
-          hero: { ...DEFAULT_SITE_DATA.hero, ...(parsed.hero || {}) },
-          whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(parsed.whoWeAre || {}) },
-          industries: { ...DEFAULT_SITE_DATA.industries, ...(parsed.industries || {}) },
-          expertise: { ...DEFAULT_SITE_DATA.expertise, ...(parsed.expertise || {}) },
-          contact: { ...DEFAULT_SITE_DATA.contact, ...(parsed.contact || {}) },
-          workCategories: parsed.workCategories || DEFAULT_SITE_DATA.workCategories,
-          caseStudies: sanitizeCaseStudies(parsed.caseStudies || DEFAULT_SITE_DATA.caseStudies),
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to parse draft content from storage:', e);
-    }
-    return DEFAULT_SITE_DATA;
-  });
+  // Base state starts with DEFAULT_SITE_DATA, then hydrates authoritatively from server
+  const [siteData, setSiteDataState] = useState<SiteData>(DEFAULT_SITE_DATA);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
   const [undoStack, setUndoStack] = useState<SiteData[]>([]);
   const [redoStack, setRedoStack] = useState<SiteData[]>([]);
@@ -182,7 +175,12 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('desktop');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
 
-  // Check if draft has unsaved changes compared to code defaults
+  // Reference timestamp of latest local edit to avoid race conditions with SSE
+  const lastLocalEditTimestampRef = React.useRef<number>(0);
+  const isAutoSavingRef = React.useRef<boolean>(false);
+  const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Check if current data has modifications compared to code defaults
   const isDraft = useMemo(() => {
     try {
       return JSON.stringify(siteData) !== JSON.stringify(DEFAULT_SITE_DATA);
@@ -191,82 +189,196 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [siteData]);
 
-  // Asynchronous IndexedDB hydration on mount for rich drafts and binary video streams
+  // 1. Authoritative initial server hydration
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY).then(async (idbDraft) => {
-      const baseDraft = idbDraft && idbDraft.caseStudies ? idbDraft : null;
-      const targetStudies = baseDraft?.caseStudies || siteData.caseStudies;
+    let isMounted = true;
 
-      // Hydrate any cached binary video blobs from IndexedDB into live object URLs
-      const hydratedStudies = await Promise.all(
-        targetStudies.map(async (study) => {
-          if (study.hasVideo && study.id) {
-            try {
-              const videoBlob = await loadVideoBlob(`video_blob_${study.id}`);
-              if (videoBlob) {
-                return {
-                  ...study,
-                  videoUrl: URL.createObjectURL(videoBlob),
-                };
-              }
-            } catch (err) {
-              console.warn('Error hydrating video blob for', study.id, err);
-            }
+    async function hydrateFromServer() {
+      try {
+        const res = await fetch('/api/content');
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.data && isMounted) {
+            const serverData = json.data;
+            const hydrated: SiteData = {
+              ...DEFAULT_SITE_DATA,
+              ...serverData,
+              config: { ...DEFAULT_SITE_DATA.config, ...(serverData.config || {}) },
+              hero: { ...DEFAULT_SITE_DATA.hero, ...(serverData.hero || {}) },
+              whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(serverData.whoWeAre || {}) },
+              industries: { ...DEFAULT_SITE_DATA.industries, ...(serverData.industries || {}) },
+              expertise: { ...DEFAULT_SITE_DATA.expertise, ...(serverData.expertise || {}) },
+              contact: { ...DEFAULT_SITE_DATA.contact, ...(serverData.contact || {}) },
+              workCategories: serverData.workCategories || DEFAULT_SITE_DATA.workCategories,
+              caseStudies: sanitizeCaseStudies(serverData.caseStudies || DEFAULT_SITE_DATA.caseStudies),
+            };
+            setSiteDataState(hydrated);
+            setSaveStatus('saved');
+            setLastSavedAt(new Date());
+            safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
+            saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
+            return;
           }
-          return study;
-        })
-      );
-
-      const sanitized = sanitizeCaseStudies(hydratedStudies);
-      if (baseDraft) {
-        setSiteDataState((current) => ({
-          ...DEFAULT_SITE_DATA,
-          ...current,
-          ...baseDraft,
-          caseStudies: sanitized,
-        }));
-      } else {
-        setSiteDataState((current) => ({
-          ...current,
-          caseStudies: sanitized,
-        }));
+        }
+      } catch (err) {
+        console.warn('Initial server fetch not available, checking local cache:', err);
       }
-    });
+
+      // Fallback: check IndexedDB or localStorage
+      try {
+        const idbDraft = await loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY);
+        if (idbDraft && idbDraft.caseStudies && isMounted) {
+          setSiteDataState({
+            ...DEFAULT_SITE_DATA,
+            ...idbDraft,
+            caseStudies: sanitizeCaseStudies(idbDraft.caseStudies),
+          });
+        }
+      } catch (e) {
+        console.warn('Local draft load error:', e);
+      }
+    }
+
+    hydrateFromServer();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Keep state with history tracking
+  // 2. Real-time SSE cross-client updates (24/7 server sync)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let evtSource: EventSource | null = null;
+
+    try {
+      evtSource = new EventSource('/api/content/stream');
+      evtSource.onmessage = (event) => {
+        try {
+          if (!event.data || typeof event.data !== 'string') return;
+          const trimmed = event.data.trim();
+          if (!trimmed.startsWith('{')) return;
+          const parsed = JSON.parse(trimmed);
+          if ((parsed.type === 'init' || parsed.type === 'content_update') && parsed.data) {
+            const incomingTimestamp = parsed.timestamp || 0;
+            // Only update if incoming broadcast is newer than our local edits
+            if (incomingTimestamp > lastLocalEditTimestampRef.current) {
+              const serverData = parsed.data;
+              const synced: SiteData = {
+                ...DEFAULT_SITE_DATA,
+                ...serverData,
+                config: { ...DEFAULT_SITE_DATA.config, ...(serverData.config || {}) },
+                hero: { ...DEFAULT_SITE_DATA.hero, ...(serverData.hero || {}) },
+                whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(serverData.whoWeAre || {}) },
+                industries: { ...DEFAULT_SITE_DATA.industries, ...(serverData.industries || {}) },
+                expertise: { ...DEFAULT_SITE_DATA.expertise, ...(serverData.expertise || {}) },
+                contact: { ...DEFAULT_SITE_DATA.contact, ...(serverData.contact || {}) },
+                workCategories: serverData.workCategories || DEFAULT_SITE_DATA.workCategories,
+                caseStudies: sanitizeCaseStudies(serverData.caseStudies || DEFAULT_SITE_DATA.caseStudies),
+              };
+              setSiteDataState(synced);
+              setSaveStatus('saved');
+              setLastSavedAt(new Date(incomingTimestamp));
+              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(synced));
+            }
+          }
+        } catch (e) {
+          console.warn('SSE message parse error:', e);
+        }
+      };
+    } catch (err) {
+      console.warn('SSE connection unavailable:', err);
+    }
+
+    return () => {
+      if (evtSource) {
+        evtSource.close();
+      }
+    };
+  }, []);
+
+  // 3. Direct Server Save Routine
+  const saveToServer = useCallback(
+    async (overrideData?: SiteData): Promise<{ success: boolean; message: string }> => {
+      const dataToSave = overrideData || siteData;
+      setSaveStatus('saving');
+      isAutoSavingRef.current = true;
+
+      try {
+        const res = await fetch('/api/content', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-cms-auth': 'sgs2026',
+          },
+          body: JSON.stringify({ content: dataToSave }),
+        });
+
+        if (res.ok) {
+          setSaveStatus('saved');
+          const now = new Date();
+          setLastSavedAt(now);
+          safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(dataToSave));
+          saveToIndexedDB(DRAFT_STORAGE_KEY, dataToSave);
+          return { success: true, message: 'Saved to server (24/7 live)' };
+        } else {
+          setSaveStatus('error');
+          return { success: false, message: 'Server responded with save error' };
+        }
+      } catch (err: any) {
+        setSaveStatus('error');
+        return { success: false, message: err?.message || 'Network error saving to server' };
+      } finally {
+        isAutoSavingRef.current = false;
+      }
+    },
+    [siteData]
+  );
+
+  // 4. State mutation handler with History and Debounced Auto-Save
   const pushState = useCallback(
     (newState: SiteData) => {
+      lastLocalEditTimestampRef.current = Date.now();
       setUndoStack((prev) => [...prev.slice(-25), siteData]);
       setRedoStack([]);
       setSiteDataState(newState);
-      // Dual-tier persistence: IndexedDB (unlimited) + localStorage (safe cache)
+      setSaveStatus('saving');
+
+      // Local offline backup
       saveToIndexedDB(DRAFT_STORAGE_KEY, newState);
       safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(newState));
+
+      // Debounced 400ms auto-save to server backend
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      autoSaveTimerRef.current = setTimeout(() => {
+        saveToServer(newState);
+      }, 400);
     },
-    [siteData]
+    [siteData, saveToServer]
   );
 
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
     const previous = undoStack[undoStack.length - 1];
+    lastLocalEditTimestampRef.current = Date.now();
     setUndoStack((prev) => prev.slice(0, prev.length - 1));
     setRedoStack((prev) => [...prev, siteData]);
     setSiteDataState(previous);
-    saveToIndexedDB(DRAFT_STORAGE_KEY, previous);
-    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(previous));
-  }, [undoStack, siteData]);
+    saveToServer(previous);
+  }, [undoStack, siteData, saveToServer]);
 
   const redo = useCallback(() => {
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
+    lastLocalEditTimestampRef.current = Date.now();
     setRedoStack((prev) => prev.slice(0, prev.length - 1));
     setUndoStack((prev) => [...prev, siteData]);
     setSiteDataState(next);
-    saveToIndexedDB(DRAFT_STORAGE_KEY, next);
-    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(next));
-  }, [redoStack, siteData]);
+    saveToServer(next);
+  }, [redoStack, siteData, saveToServer]);
 
   // Authorization helper
   const authorize = useCallback((passcode: string) => {
@@ -400,11 +512,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const saveDraft = useCallback(() => {
-    // 1. Always save to IndexedDB (virtually unlimited capacity, zero QuotaExceededError)
-    saveToIndexedDB(DRAFT_STORAGE_KEY, siteData);
-    // 2. Safely attempt localStorage cache without throwing QuotaExceededError
-    safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(siteData));
-  }, [siteData]);
+    saveToServer(siteData);
+  }, [siteData, saveToServer]);
 
   const resetToDefaults = useCallback(() => {
     removeFromIndexedDB(DRAFT_STORAGE_KEY);
@@ -414,15 +523,37 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setUndoStack((prev) => [...prev, siteData]);
     setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
-  }, [siteData]);
+    saveToServer(DEFAULT_SITE_DATA);
+  }, [siteData, saveToServer]);
 
-  const discardDraft = useCallback(() => {
-    removeFromIndexedDB(DRAFT_STORAGE_KEY);
+  const syncWithCodebase = useCallback(async () => {
     try {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      const res = await fetch('/api/content');
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data) {
+          const fresh = {
+            ...DEFAULT_SITE_DATA,
+            ...json.data,
+            caseStudies: sanitizeCaseStudies(json.data.caseStudies || DEFAULT_SITE_DATA.caseStudies),
+          };
+          setUndoStack([]);
+          setRedoStack([]);
+          setSiteDataState(fresh);
+          setSaveStatus('saved');
+          return;
+        }
+      }
     } catch {}
+
+    setUndoStack([]);
+    setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
   }, []);
+
+  const discardDraft = useCallback(() => {
+    syncWithCodebase();
+  }, [syncWithCodebase]);
 
   const exportTypeScriptCode = useCallback(() => {
     return generateSiteContentTs(siteData);
@@ -460,31 +591,35 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const publishToCodebase = useCallback(async () => {
     const tsCode = generateSiteContentTs(siteData);
     try {
+      // 1. Commit to persistent server JSON
+      await saveToServer(siteData);
+
+      // 2. Commit to static src/data/siteContent.ts
       const res = await fetch('/api/save-content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tsContent: tsCode }),
       });
+
       if (res.ok) {
         const data = await res.json();
         return {
           success: true,
-          message: data.message || 'Published permanently to src/data/siteContent.ts',
+          message: data.message || 'Published 24/7 Live to Server & Codebase',
           bytes: data.bytes,
         };
       }
-      const err = await res.json().catch(() => ({}));
       return {
-        success: false,
-        message: err.error || 'Server publishing returned error. Please download file.',
+        success: true,
+        message: 'Saved 24/7 Live to Server',
       };
     } catch {
       return {
         success: false,
-        message: 'Direct API writing not reachable in static mode. Use "Download siteContent.ts".',
+        message: 'Direct API writing not reachable in static mode.',
       };
     }
-  }, [siteData]);
+  }, [siteData, saveToServer]);
 
   const openEditor = useCallback((tab?: EditorTab, projectId?: string | null) => {
     setIsAuthorized(true);
@@ -531,6 +666,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isDraft,
         canUndo: undoStack.length > 0,
         canRedo: redoStack.length > 0,
+        saveStatus,
+        lastSavedAt,
         openEditor,
         closeEditor,
         toggleEditor,
@@ -555,6 +692,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         undo,
         redo,
         saveDraft,
+        saveToServer: () => saveToServer(siteData),
         resetToDefaults,
         discardDraft,
         exportTypeScriptCode,
@@ -562,6 +700,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         importJsonCode,
         publishToCodebase,
         saveProjectVideoBlob,
+        syncWithCodebase,
       }}
     >
       {children}

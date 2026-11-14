@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { MediaControl } from './MediaControl.tsx';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
 import { Briefcase, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { IndustryItem } from '../../data/siteContent.ts';
 
@@ -116,6 +117,13 @@ export const IndustriesEditor: React.FC = () => {
         </div>
       </div>
 
+      {/* Per-Device Section Spacing */}
+      <DeviceLayoutControl
+        title="Section 03 Layout by Device"
+        value={industries.responsiveLayout}
+        onChange={(next) => updateIndustries({ responsiveLayout: next })}
+      />
+
       {/* Industry Sector Items with Reordering & Add */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -209,13 +217,15 @@ export const IndustriesEditor: React.FC = () => {
               label="Track Photography"
               url={item.image}
               focalPoint={item.focalPoint || 'center'}
-              aspectRatio="16:9"
+              aspectRatio={item.cropAspect || '16:10'}
               fit="cover"
               allowVideo={false}
+              responsiveMedia={item.responsiveMedia}
+              onResponsiveChange={(next) => updateItem(idx, { responsiveMedia: next })}
               onChange={(patch) => {
                 updateItem(idx, {
                   image: patch.url || item.image,
-                  focalPoint: patch.focalPoint,
+                  focalPoint: patch.focalPoint ?? item.focalPoint,
                 });
               }}
             />

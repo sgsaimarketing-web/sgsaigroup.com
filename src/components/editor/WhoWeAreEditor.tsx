@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { MediaControl } from './MediaControl.tsx';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
 import { Layers } from 'lucide-react';
 
 export const WhoWeAreEditor: React.FC = () => {
@@ -96,6 +97,15 @@ export const WhoWeAreEditor: React.FC = () => {
         </div>
       </div>
 
+      {/* Per-Device Layout Controls */}
+      <DeviceLayoutControl
+        title="Section 02 Layout by Device"
+        value={whoWeAre.responsiveLayout}
+        onChange={(next) => updateWhoWeAre({ responsiveLayout: next })}
+        showMobileLayout={true}
+        showTabletColumns={true}
+      />
+
       {/* 3 Discipline Cards */}
       <div className="space-y-4">
         <h4 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
@@ -139,10 +149,12 @@ export const WhoWeAreEditor: React.FC = () => {
               aspectRatio="4:5"
               fit="cover"
               allowVideo={false}
+              responsiveMedia={card.responsiveMedia}
+              onResponsiveChange={(next) => updateCard(idx, { responsiveMedia: next })}
               onChange={(patch) => {
                 updateCard(idx, {
                   image: patch.url || card.image,
-                  focalPoint: patch.focalPoint,
+                  focalPoint: patch.focalPoint ?? card.focalPoint,
                 });
               }}
             />

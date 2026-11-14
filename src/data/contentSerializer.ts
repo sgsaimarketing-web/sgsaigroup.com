@@ -1,4 +1,4 @@
-import {
+import type {
   SiteConfig,
   NavItem,
   HeroContent,
@@ -36,6 +36,38 @@ export function generateSiteContentTs(data: SiteData): string {
  * Generated via SGS AI Group Visual Content & Design Editor
  */
 
+export type DeviceBreakpoint = 'laptop' | 'tablet' | 'mobile';
+export type MediaAspectRatio = 'auto' | '16:9' | '16:10' | '4:3' | '3:2' | '4:5' | '3:4' | '9:16' | '1:1';
+export type MediaFitMode = 'cover' | 'contain';
+export type MediaFocalPoint = 'center' | 'top' | 'bottom' | 'left' | 'right';
+export type DeviceHeightScale = 'compact' | 'standard' | 'tall';
+
+export interface DeviceMediaOverride {
+  aspectRatio?: MediaAspectRatio;
+  fit?: MediaFitMode;
+  focalPoint?: MediaFocalPoint;
+  heightScale?: DeviceHeightScale;
+}
+
+export interface ResponsiveMediaOverrides {
+  laptop?: DeviceMediaOverride;
+  tablet?: DeviceMediaOverride;
+  mobile?: DeviceMediaOverride;
+}
+
+export interface SectionLayoutOverride {
+  paddingY?: 'compact' | 'standard' | 'spacious';
+  mobileLayout?: 'carousel' | 'stack' | 'grid-2';
+  columnsTablet?: 2 | 3;
+  columnsLaptop?: 2 | 3 | 4;
+}
+
+export interface ResponsiveSectionOverrides {
+  laptop?: SectionLayoutOverride;
+  tablet?: SectionLayoutOverride;
+  mobile?: SectionLayoutOverride;
+}
+
 export interface NavItem {
   label: string;
   href: string;
@@ -49,7 +81,8 @@ export interface IndustryItem {
   image: string;
   imageAlt: string;
   cropAspect?: '16:9' | '4:3' | '1:1' | 'auto';
-  focalPoint?: 'center' | 'top' | 'bottom';
+  focalPoint?: MediaFocalPoint;
+  responsiveMedia?: ResponsiveMediaOverrides;
 }
 
 export interface CapabilityItem {
@@ -64,7 +97,8 @@ export interface WhoWeAreCard {
   subtitle: string;
   image: string;
   imageAlt: string;
-  focalPoint?: 'center' | 'top' | 'bottom';
+  focalPoint?: MediaFocalPoint;
+  responsiveMedia?: ResponsiveMediaOverrides;
 }
 
 export interface GalleryMediaItem {
@@ -73,10 +107,11 @@ export interface GalleryMediaItem {
   type: 'image' | 'video';
   title?: string;
   caption?: string;
-  aspectRatio?: '16:9' | '9:16' | '4:5' | '1:1' | '3:2' | 'auto';
-  fit?: 'cover' | 'contain';
-  focalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  aspectRatio?: MediaAspectRatio;
+  fit?: MediaFitMode;
+  focalPoint?: MediaFocalPoint;
   poster?: string;
+  responsiveMedia?: ResponsiveMediaOverrides;
 }
 
 export interface CaseStudy {
@@ -89,8 +124,10 @@ export interface CaseStudy {
   title: string;
   subtitle: string;
   coverImage: string;
-  coverFit?: 'cover' | 'contain';
-  coverFocalPoint?: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  posterUrl?: string;
+  coverFit?: MediaFitMode;
+  coverFocalPoint?: MediaFocalPoint;
+  responsiveMedia?: ResponsiveMediaOverrides;
   thumbnails: string[];
   gallery?: GalleryMediaItem[];
   challenge: string;
@@ -129,6 +166,7 @@ export interface SiteConfig {
   phoneAppointments: string;
   regions: string;
   copyright: string;
+  selectedWorkLayout?: ResponsiveSectionOverrides;
 }
 
 export interface HeroContent {
@@ -143,9 +181,11 @@ export interface HeroContent {
   };
   backgroundImage?: string;
   backgroundVideo?: string;
-  backgroundFit?: 'cover' | 'contain';
-  backgroundFocalPoint?: 'center' | 'top' | 'bottom' | 'right' | 'left';
+  backgroundFit?: MediaFitMode;
+  backgroundFocalPoint?: MediaFocalPoint;
   animationSpeed?: 'subtle' | 'standard' | 'dynamic';
+  responsiveMedia?: ResponsiveMediaOverrides;
+  responsiveLayout?: ResponsiveSectionOverrides;
 }
 
 export interface WhoWeAreContent {
@@ -156,6 +196,7 @@ export interface WhoWeAreContent {
   description: string;
   baseline: string;
   cards: WhoWeAreCard[];
+  responsiveLayout?: ResponsiveSectionOverrides;
 }
 
 export interface IndustriesContent {
@@ -165,6 +206,7 @@ export interface IndustriesContent {
   headlineAccent: string;
   description: string;
   items: IndustryItem[];
+  responsiveLayout?: ResponsiveSectionOverrides;
 }
 
 export interface ExpertiseContent {
@@ -172,6 +214,7 @@ export interface ExpertiseContent {
   eyebrow: string;
   headlineLines: string[];
   capabilities: CapabilityItem[];
+  responsiveLayout?: ResponsiveSectionOverrides;
 }
 
 export interface ContactContent {
@@ -186,6 +229,7 @@ export interface ContactContent {
   footerPrivacy: string;
   recipientEmail?: string;
   successMessage?: string;
+  responsiveLayout?: ResponsiveSectionOverrides;
 }
 
 export const SITE_CONFIG: SiteConfig = ${JSON.stringify(data.config, null, 2)};

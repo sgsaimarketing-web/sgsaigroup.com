@@ -25,10 +25,40 @@ import { EditorDrawer } from './components/editor/EditorDrawer.tsx';
 import { CaseStudy } from './data/siteContent.ts';
 
 function WebsiteContent() {
-  const { siteData, isAuthorized, isEditorOpen, previewDevice } = useSiteContent();
+  const {
+    siteData,
+    isAuthorized,
+    isEditorOpen,
+    previewDevice,
+    isDraft,
+    syncWithCodebase,
+    openEditor,
+  } = useSiteContent();
   const [selectedProject, setSelectedProject] = useState<CaseStudy | null>(null);
   const [showShowreel, setShowShowreel] = useState<boolean>(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(true);
+  const [activeWorkCategory, setActiveWorkCategory] = useState<string>('brand-campaigns');
+  const [preselectedObjective, setPreselectedObjective] = useState<string>('Brand Strategy & Creative');
+
+  const handleNavigateToWork = (categoryId?: string) => {
+    if (categoryId) {
+      setActiveWorkCategory(categoryId);
+    }
+    const target = document.getElementById('our-work');
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const handleNavigateToContact = (objective?: string) => {
+    if (objective) {
+      setPreselectedObjective(objective);
+    }
+    const target = document.getElementById('contact');
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   useEffect(() => {
     // Subtle IntersectionObserver for restrained editorial reveals
@@ -95,18 +125,20 @@ function WebsiteContent() {
         className={
           isSimulatedDevice
             ? previewDevice === 'tablet'
-              ? 'max-w-[768px] mx-auto my-8 border-12 border-[#1E2430] rounded-[36px] shadow-2xl overflow-hidden bg-white ring-1 ring-white/10'
-              : 'max-w-[390px] mx-auto my-8 border-12 border-[#1E2430] rounded-[44px] shadow-2xl overflow-hidden bg-white ring-1 ring-white/10'
+              ? 'w-full max-w-[768px] mx-auto my-8 border-[10px] border-[#1E2430] rounded-[32px] shadow-2xl overflow-hidden bg-white ring-1 ring-white/10 transition-all duration-300'
+              : 'w-full max-w-[390px] mx-auto my-8 border-[10px] border-[#1E2430] rounded-[40px] shadow-2xl overflow-hidden bg-white ring-1 ring-white/10 transition-all duration-300'
             : 'w-full'
         }
       >
         {/* Device Notch / Camera Indicator */}
         {isSimulatedDevice && (
-          <div className="bg-[#1E2430] py-1.5 flex justify-center items-center">
-            <div className="h-3.5 w-24 bg-black/60 rounded-full flex items-center justify-center">
-              <div className="size-2 rounded-full bg-[#2563EB]/40 mr-2" />
-              <div className="size-1.5 rounded-full bg-white/20" />
+          <div className="bg-[#1E2430] px-4 py-1.5 flex justify-between items-center text-[10px] font-mono text-white/50">
+            <span>{previewDevice === 'tablet' ? 'Tablet Preview' : 'Mobile Preview'}</span>
+            <div className="h-3 w-20 bg-black/60 rounded-full flex items-center justify-center">
+              <div className="size-1.5 rounded-full bg-[#2563EB]/60 mr-1.5" />
+              <div className="size-1 rounded-full bg-white/20" />
             </div>
+            <span>{previewDevice === 'tablet' ? '768px' : '390px'}</span>
           </div>
         )}
 
@@ -122,16 +154,23 @@ function WebsiteContent() {
           <WhoWeAre />
 
           {/* 03 — Industries: Five Essential Sector Tracks with Horizontal Slider */}
-          <Industries />
+          <Industries onSelectCategory={handleNavigateToWork} />
 
           {/* 04 — Our Expertise: All Six Core Categories in Clean Bento Grid */}
-          <Expertise />
+          <Expertise
+            onExploreCategory={handleNavigateToWork}
+            onScopeObjective={handleNavigateToContact}
+          />
 
           {/* 05 — Selected Work: Four Interactive Categories & Case Study Showcase */}
-          <SelectedWork onSelectProject={(project) => setSelectedProject(project)} />
+          <SelectedWork
+            activeCategory={activeWorkCategory}
+            onCategoryChange={setActiveWorkCategory}
+            onSelectProject={(project) => setSelectedProject(project)}
+          />
 
           {/* 06 — Contact: Verified Business Details & Direct Action Enquiry Form */}
-          <Contact />
+          <Contact preselectedObjective={preselectedObjective} />
         </main>
 
         {/* Footer */}
@@ -150,7 +189,37 @@ function WebsiteContent() {
       <ShowreelModal
         isOpen={showShowreel}
         onClose={() => setShowShowreel(false)}
+        onExploreWork={() => handleNavigateToWork()}
+        onStartProject={() => handleNavigateToContact()}
       />
+
+      {/* Floating Draft Indicator & 1-Click Sync to Live Codebase */}
+      {isDraft && !isEditorOpen && (
+        <aside
+          aria-label="Draft mode notification"
+          className="fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 rounded-xl border border-amber-500/40 bg-[#0F1218]/95 px-3.5 py-2.5 text-xs text-white shadow-2xl backdrop-blur-md"
+        >
+          <div className="flex items-center gap-1.5 font-mono text-[11px] text-amber-300">
+            <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="font-semibold">Local Draft Active</span>
+          </div>
+          <button
+            type="button"
+            onClick={syncWithCodebase}
+            className="rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition cursor-pointer"
+            title="Purge local browser cache and reload official live site"
+          >
+            Sync to Live Site
+          </button>
+          <button
+            type="button"
+            onClick={() => openEditor('work')}
+            className="rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-2.5 py-1 text-[11px] font-bold text-white transition cursor-pointer"
+          >
+            Open CMS
+          </button>
+        </aside>
+      )}
     </div>
   );
 }

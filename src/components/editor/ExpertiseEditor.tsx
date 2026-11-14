@@ -17,6 +17,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { CapabilityItem } from '../../data/siteContent.ts';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
 
 const ICON_OPTIONS = [
   { id: 'lightbulb', label: 'Lightbulb (Strategy & Creative)', icon: Lightbulb },
@@ -142,6 +143,14 @@ export const ExpertiseEditor: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Per-Device Layout Controls */}
+      <DeviceLayoutControl
+        title="Section 04 Layout by Device"
+        value={expertise.responsiveLayout}
+        onChange={(next) => updateExpertise({ responsiveLayout: next })}
+        showTabletColumns={true}
+      />
 
       {/* 6 Core Capability Items */}
       <div className="space-y-4">

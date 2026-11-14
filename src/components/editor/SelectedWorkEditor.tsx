@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import { MediaControl } from './MediaControl.tsx';
+import { DeviceLayoutControl } from './DeviceLayoutControl.tsx';
 import { VideoThumbnailPicker } from './VideoThumbnailPicker.tsx';
 import {
   FolderKanban,
@@ -26,6 +27,7 @@ type ProjectSubTab = 'media' | 'story' | 'dossier';
 export const SelectedWorkEditor: React.FC = () => {
   const {
     siteData,
+    updateConfig,
     updateWorkCategories,
     updateCaseStudies,
     updateSingleCaseStudy,
@@ -230,7 +232,16 @@ export const SelectedWorkEditor: React.FC = () => {
 
       {/* Main View: Projects List vs Selected Project 3-Tab Editor */}
       {!activeProject ? (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <DeviceLayoutControl
+            title="Section 05 Selected Work Layout by Device"
+            value={siteData.config.selectedWorkLayout}
+            onChange={(next) => updateConfig({ selectedWorkLayout: next })}
+            showMobileLayout={true}
+            showTabletColumns={true}
+            showLaptopColumns={true}
+          />
+
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
               {siteData.workCategories.find((c) => c.id === activeCatId)?.label} ({filteredProjects.length})
@@ -417,21 +428,25 @@ export const SelectedWorkEditor: React.FC = () => {
           {/* TAB 1: MEDIA & VISUALS */}
           {projectSubTab === 'media' && (
             <div className="space-y-4 animate-in fade-in duration-150">
-              {/* 1. Dedicated 9:16 Vertical Card Poster (Strictly Image, No Video) */}
+              {/* 1. Dedicated Card Poster / Thumbnail Visual with Per-Device Overrides */}
               <MediaControl
-                label="9:16 Vertical Card Poster / Thumbnail Visual"
+                label="Card Poster / Thumbnail Visual"
                 url={activeProject.posterUrl || activeProject.coverImage}
                 mediaType="image"
                 fit={activeProject.coverFit || 'cover'}
                 focalPoint={activeProject.coverFocalPoint || 'center'}
                 aspectRatio="9:16"
                 allowVideo={false}
+                responsiveMedia={activeProject.responsiveMedia}
+                onResponsiveChange={(next) =>
+                  updateSingleCaseStudy(activeProject.id, { responsiveMedia: next })
+                }
                 onChange={(patch) => {
                   updateSingleCaseStudy(activeProject.id, {
                     coverImage: patch.url || activeProject.coverImage,
                     posterUrl: patch.url || activeProject.posterUrl,
-                    coverFit: patch.fit,
-                    coverFocalPoint: patch.focalPoint,
+                    coverFit: patch.fit ?? activeProject.coverFit,
+                    coverFocalPoint: patch.focalPoint ?? activeProject.coverFocalPoint,
                   });
                 }}
               />
@@ -634,6 +649,15 @@ export const SelectedWorkEditor: React.FC = () => {
                         aspectRatio={item.aspectRatio || '9:16'}
                         caption={item.caption}
                         posterUrl={item.poster || activeProject.posterUrl || activeProject.coverImage}
+                        responsiveMedia={item.responsiveMedia}
+                        onResponsiveChange={(next) => {
+                          const gallery = [...getProjectGallery(activeProject)];
+                          gallery[gIdx] = {
+                            ...gallery[gIdx],
+                            responsiveMedia: next,
+                          };
+                          updateGallery(activeProject, gallery);
+                        }}
                         onPosterChange={(poster) => {
                           const gallery = [...getProjectGallery(activeProject)];
                           gallery[gIdx] = {

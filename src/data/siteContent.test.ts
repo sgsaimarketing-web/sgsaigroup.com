@@ -84,4 +84,38 @@ test('contact section preserves verified direct communication links', () => {
   assert.equal(CONTACT_CONTENT.details[0].value, '+60 11-3944 0907');
   assert.equal(CONTACT_CONTENT.details[1].value, '+60 17-270 8575');
   assert.equal(CONTACT_CONTENT.details[2].value, 'sgsaimarketing@gmail.com');
+  assert.ok(CONTACT_CONTENT.successMessage && CONTACT_CONTENT.successMessage.length > 20);
+});
+
+test('all case study assets exist on disk and non-video posters are typed as image', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+
+  const checkAssetExists = (assetPath?: string) => {
+    if (!assetPath || !assetPath.startsWith('/assets/')) return;
+    const diskPath = path.join(process.cwd(), 'public', assetPath);
+    assert.ok(fs.existsSync(diskPath), `Missing public asset: ${assetPath}`);
+  };
+
+  for (const card of WHO_WE_ARE_CONTENT.cards) {
+    checkAssetExists(card.image);
+  }
+  for (const ind of INDUSTRIES_CONTENT.items) {
+    checkAssetExists(ind.image);
+  }
+  for (const study of CASE_STUDIES) {
+    checkAssetExists(study.coverImage);
+    checkAssetExists(study.posterUrl);
+    checkAssetExists(study.videoUrl);
+    for (const thumb of study.thumbnails) {
+      checkAssetExists(thumb);
+    }
+    for (const item of study.gallery || []) {
+      checkAssetExists(item.url);
+      checkAssetExists(item.poster);
+      if (item.url.endsWith('.webp') || item.url.endsWith('.png') || item.url.endsWith('.jpg')) {
+        assert.equal(item.type, 'image', `Image asset ${item.url} should not have type "video"`);
+      }
+    }
+  }
 });
