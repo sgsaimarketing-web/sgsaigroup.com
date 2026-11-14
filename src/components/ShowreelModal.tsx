@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Sparkles, ArrowRight, Video } from 'lucide-react';
 import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
 
@@ -69,6 +69,8 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const isMutedRef = useRef<boolean>(isMuted);
+  isMutedRef.current = isMuted;
 
   const activeTrack = SHOWREEL_TRACKS[activeTrackIndex] || SHOWREEL_TRACKS[0];
 
@@ -100,7 +102,7 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
     const timer = setTimeout(() => {
       const video = videoRef.current;
       if (!video) return;
-      video.muted = isMuted;
+      video.muted = isMutedRef.current;
       video
         .play()
         .then(() => setIsPlaying(true))
@@ -117,7 +119,7 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
     return () => clearTimeout(timer);
   }, [isOpen, activeTrackIndex]);
 
-  const togglePlayback = () => {
+  const togglePlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -139,15 +141,15 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
       video.pause();
       setIsPlaying(false);
     }
-  };
+  }, []);
 
-  const toggleMute = () => {
-    const nextMuted = !isMuted;
+  const toggleMute = useCallback(() => {
+    const nextMuted = !isMutedRef.current;
     if (videoRef.current) {
       videoRef.current.muted = nextMuted;
     }
     setIsMuted(nextMuted);
-  };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -163,7 +165,7 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, isMuted, isPlaying]);
+  }, [isOpen, onClose, togglePlayback, toggleMute]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;

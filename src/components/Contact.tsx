@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowRight, Mail, CheckCircle2, MessageSquare, Copy, Check, ExternalLink } from 'lucide-react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { EditableBlock } from './editor/EditableBlock.tsx';
@@ -14,18 +14,39 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
   const device = useEffectiveDevice();
   const contact = siteData.contact;
 
+  const serviceOptions = useMemo(() => {
+    const baseOptions = siteData.expertise.capabilities.map((cap) =>
+      cap.title === 'Digital Marketing' ? 'Digital Marketing & Performance' : cap.title
+    );
+    if (preselectedObjective && !baseOptions.includes(preselectedObjective)) {
+      baseOptions.unshift(preselectedObjective);
+    }
+    return baseOptions;
+  }, [siteData.expertise.capabilities, preselectedObjective]);
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    service: preselectedObjective || 'Brand Strategy & Creative',
+    service: preselectedObjective || serviceOptions[0] || 'Brand Strategy & Creative',
     message: '',
   });
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  const submitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (submitTimerRef.current) clearTimeout(submitTimerRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (preselectedObjective) {
       setFormData((prev) => ({ ...prev, service: preselectedObjective }));
       setSubmitted(false);
@@ -79,15 +100,26 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) return;
+    let hasError = false;
+    if (!formData.name.trim()) {
+      setNameError('Please enter your name or company contact.');
+      hasError = true;
+    } else {
+      setNameError(null);
+    }
+
     if (!isValidEmail(formData.email)) {
       setEmailError('Please enter a valid business email address.');
-      return;
+      hasError = true;
+    } else {
+      setEmailError(null);
     }
-    setEmailError(null);
-    setLoading(true);
 
-    setTimeout(() => {
+    if (hasError) return;
+
+    setLoading(true);
+    if (submitTimerRef.current) clearTimeout(submitTimerRef.current);
+    submitTimerRef.current = setTimeout(() => {
       setLoading(false);
       setSubmitted(true);
     }, 220);
@@ -98,7 +130,8 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2500);
     } catch {
       // Clipboard API unavailable in restricted iframe
     }
@@ -269,7 +302,7 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
                   </div>
                 </div>
               ) : (
-                <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
                   <div>
                     <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-[#101318]">
                       Your Name *
@@ -278,11 +311,24 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
                       id="name"
                       type="text"
                       required
+                      aria-invalid={Boolean(nameError)}
                       value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      onChange={(e) => {
+                        setFormData({ ...formData, name: e.target.value });
+                        if (nameError) setNameError(null);
+                      }}
                       placeholder="e.g. Sarah Tan"
-                      className="mt-1.5 w-full rounded-sm border border-black/[0.12] bg-[#F8FAFC] px-4 py-3 min-h-[46px] text-base sm:text-sm text-[#101318] placeholder-[#94A3B8] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                      className={`mt-1.5 w-full rounded-sm border px-4 py-3 min-h-[46px] text-base sm:text-sm text-[#101318] placeholder-[#94A3B8] focus:bg-white focus:outline-none focus:ring-1 ${
+                        nameError
+                          ? 'border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500'
+                          : 'border-black/[0.12] bg-[#F8FAFC] focus:border-[#2563EB] focus:ring-[#2563EB]'
+                      }`}
                     />
+                    {nameError && (
+                      <p role="alert" className="mt-1 text-xs text-red-600 font-medium">
+                        {nameError}
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -293,6 +339,7 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
                       id="email"
                       type="email"
                       required
+                      aria-invalid={Boolean(emailError)}
                       value={formData.email}
                       onChange={(e) => {
                         setFormData({ ...formData, email: e.target.value });
@@ -306,7 +353,7 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
                       }`}
                     />
                     {emailError && (
-                      <p className="mt-1 text-xs text-red-600 font-medium">
+                      <p role="alert" className="mt-1 text-xs text-red-600 font-medium">
                         {emailError}
                       </p>
                     )}
@@ -322,12 +369,11 @@ export const Contact: React.FC<ContactProps> = ({ preselectedObjective }) => {
                       onChange={(e) => setFormData({ ...formData, service: e.target.value })}
                       className="mt-1.5 w-full rounded-sm border border-black/[0.12] bg-[#F8FAFC] px-4 py-3 min-h-[46px] text-base sm:text-sm text-[#101318] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
                     >
-                      <option value="Brand Strategy & Creative">Brand Strategy &amp; Creative</option>
-                      <option value="Digital Marketing & Performance">Digital Marketing &amp; Performance</option>
-                      <option value="Content & Media Production">Content &amp; Media Production</option>
-                      <option value="AI Applications & Engineering">AI Applications &amp; Engineering</option>
-                      <option value="Business Process Automation">Business Process Automation</option>
-                      <option value="Websites & Digital Experiences">Websites &amp; Digital Experiences</option>
+                      {serviceOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
                     </select>
                   </div>
 

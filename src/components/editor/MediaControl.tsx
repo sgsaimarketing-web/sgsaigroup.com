@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Image, Video, RefreshCw, Sparkles, AlertCircle, Monitor, Tablet, Smartphone, Layers, RotateCcw } from 'lucide-react';
 import { processMediaUpload, CompressionResult } from '../../utils/mediaCompressor.ts';
 import type {
@@ -11,7 +11,12 @@ import type {
   ResponsiveMediaOverrides,
 } from '../../data/siteContent.ts';
 import { useSiteContent } from '../../context/ContentContext.tsx';
-import { mapPreviewDeviceToBreakpoint } from '../../utils/responsiveMedia.ts';
+import {
+  getFocalClass,
+  isImageAssetUrl,
+  isVideoAssetUrl,
+  mapPreviewDeviceToBreakpoint,
+} from '../../utils/responsiveMedia.ts';
 
 interface MediaControlProps {
   label: string;
@@ -41,14 +46,13 @@ interface MediaControlProps {
 const PRESET_ASSETS = [
   { label: 'Alzara Selera Terangkat Reel', url: '/assets/work/alzara-curry-reel.mp4', type: 'video' },
   { label: 'My Kaapie Filter Coffee Reel', url: '/assets/work/mykaapie-coffee-reel.mp4', type: 'video' },
-  { label: 'Nelson Official Video Reel', url: '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4', type: 'video' },
+  { label: 'SGS NIRA Showcase Reel', url: '/assets/nira-loop.mp4', type: 'video' },
   { label: 'Alzara Curry Poster', url: '/assets/work/alzara-curry-poster.webp', type: 'image' },
   { label: 'My Kaapie Coffee Poster', url: '/assets/work/mykaapie-coffee-poster.webp', type: 'image' },
   { label: 'Biho Food Festive Poster', url: '/assets/work/biho-festive-poster.webp', type: 'image' },
   { label: 'Biho Food Gift Hamper', url: '/assets/work/biho-gift-bag.webp', type: 'image' },
   { label: 'Nelson Diamond Inspection', url: '/assets/work/nelson-diamond.png', type: 'image' },
   { label: 'Nelson Trading Cosmic', url: '/assets/work/nelson-trading.png', type: 'image' },
-  { label: 'SGS NIRA Showcase Reel', url: '/assets/nira-loop.mp4', type: 'video' },
   { label: 'NIRA Official Hero', url: '/assets/nira-official.png', type: 'image' },
   { label: 'Connected Earth', url: '/assets/nira-connected-earth.png', type: 'image' },
   { label: 'Luxury Fragrance', url: '/assets/work/luxury-fragrance.jpg', type: 'image' },
@@ -82,7 +86,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   onChange,
   allowVideo = true,
 }) => {
-  const { previewDevice, setPreviewDevice } = useSiteContent();
+  const { previewDevice, setPreviewDevice, getCmsAuthHeaders } = useSiteContent();
   const [showPresets, setShowPresets] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressingLabel, setCompressingLabel] = useState('Compressing...');
@@ -91,6 +95,24 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   const [compressionBadge, setCompressionBadge] = useState<string | null>(null);
   const [previewAspect, setPreviewAspect] = useState<'current' | '9:16' | 'landscape'>('current');
   const [editingTarget, setEditingTarget] = useState<'base' | DeviceBreakpoint>('base');
+
+  const localBlobUrlRef = useRef<string | null>(null);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const posterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+      if (posterTimerRef.current) clearTimeout(posterTimerRef.current);
+      if (localBlobUrlRef.current) {
+        try {
+          URL.revokeObjectURL(localBlobUrlRef.current);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
 
   // Keep selected override tab in sync if toolbar device changes while inspecting a device override
   useEffect(() => {
@@ -148,9 +170,9 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     onResponsiveChange(next);
   };
 
-  // Detect genuine media type (avoid rendering a base64 image inside a <video> element)
-  const isImageSrc = url.startsWith('data:image/') || url.endsWith('.png') || url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.webp');
-  const isVideoSrc = url.startsWith('data:video/') || url.endsWith('.mp4') || url.endsWith('.webm') || url.startsWith('blob:');
+  // Detect genuine media type using unified responsiveMedia helpers
+  const isImageSrc = isImageAssetUrl(url);
+  const isVideoSrc = isVideoAssetUrl(url);
   const resolvedMediaType = isImageSrc ? 'image' : isVideoSrc ? 'video' : mediaType;
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -161,8 +183,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setUploadError(null);
     setCompressionBadge(null);
 
-    // Safety timeout: Never leave UI locked in Compressing state for over 15 seconds
-    const safetyTimer = setTimeout(() => {
+    if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+    safetyTimerRef.current = setTimeout(() => {
       setIsCompressing(false);
     }, 15000);
 
@@ -173,8 +195,15 @@ export const MediaControl: React.FC<MediaControlProps> = ({
 
       if (isVideo) {
         setCompressingLabel('Loading Video...');
-        // 1. Instantly wire up native local stream so user can preview and scrub immediately
+        if (localBlobUrlRef.current) {
+          try {
+            URL.revokeObjectURL(localBlobUrlRef.current);
+          } catch {
+            // ignore
+          }
+        }
         const localStreamUrl = URL.createObjectURL(file);
+        localBlobUrlRef.current = localStreamUrl;
         onChange({
           url: localStreamUrl,
           type: 'video',
@@ -187,7 +216,6 @@ export const MediaControl: React.FC<MediaControlProps> = ({
         const sizeKb = Math.round(file.size / 1024);
         setCompressionBadge(`Local Stream Active (${sizeKb}KB) - Syncing to Server...`);
 
-        // 2. Attempt server upload in background with 12s timeout
         setCompressingLabel('Saving to Server...');
         try {
           const controller = new AbortController();
@@ -200,6 +228,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
             headers: {
               'x-file-name': uploadName,
               'content-type': file.type || 'video/mp4',
+              ...getCmsAuthHeaders(),
             },
             body: file,
             signal: controller.signal,
@@ -213,21 +242,31 @@ export const MediaControl: React.FC<MediaControlProps> = ({
                 url: uploadData.url,
                 type: 'video',
               });
+              if (localBlobUrlRef.current === localStreamUrl) {
+                try {
+                  URL.revokeObjectURL(localStreamUrl);
+                } catch {
+                  // ignore
+                }
+                localBlobUrlRef.current = null;
+              }
               setCompressionBadge(`✓ Saved to Public Server (${sizeKb}KB)`);
             }
           } else {
-            setCompressionBadge(`✓ Local Stream & Cache Active (${sizeKb}KB)`);
+            const errJson = await uploadRes.json().catch(() => null);
+            setCompressionBadge(`✓ Local Stream Active (${sizeKb}KB)`);
+            if (errJson?.error) {
+              setUploadError(`Server upload notice: ${errJson.error}`);
+            }
           }
         } catch (serverErr) {
           console.warn('Server media upload bypassed, retaining active local stream:', serverErr);
           setCompressionBadge(`✓ Local Stream & Cache Active (${sizeKb}KB)`);
         }
       } else {
-        // Image processing with WebP compression
         setCompressingLabel('Compressing WebP...');
         const result: CompressionResult = await processMediaUpload(file, 1600, 1600, 0.82);
 
-        // Immediate responsive preview
         onChange({
           url: result.dataUrl,
           type: 'image',
@@ -239,7 +278,10 @@ export const MediaControl: React.FC<MediaControlProps> = ({
           const abortTimeout = setTimeout(() => controller.abort(), 7000);
           const imgRes = await fetch('/api/upload-media', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...getCmsAuthHeaders(),
+            },
             body: JSON.stringify({
               fileName: `img-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
               dataUrl: result.dataUrl,
@@ -258,7 +300,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
               });
             }
           }
-        } catch (e) {
+        } catch {
           // Keep compressed WebP dataUrl
         }
 
@@ -276,24 +318,12 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to process media upload.');
     } finally {
-      clearTimeout(safetyTimer);
+      if (safetyTimerRef.current) {
+        clearTimeout(safetyTimerRef.current);
+        safetyTimerRef.current = null;
+      }
       setIsCompressing(false);
       e.target.value = '';
-    }
-  };
-
-  const getFocalClass = (f: string) => {
-    switch (f) {
-      case 'top':
-        return 'object-top';
-      case 'bottom':
-        return 'object-bottom';
-      case 'left':
-        return 'object-left';
-      case 'right':
-        return 'object-right';
-      default:
-        return 'object-center';
     }
   };
 
@@ -304,7 +334,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setIsPosterCompressing(true);
     setUploadError(null);
 
-    const safetyTimer = setTimeout(() => {
+    if (posterTimerRef.current) clearTimeout(posterTimerRef.current);
+    posterTimerRef.current = setTimeout(() => {
       setIsPosterCompressing(false);
     }, 10000);
 
@@ -318,7 +349,10 @@ export const MediaControl: React.FC<MediaControlProps> = ({
         const abortTimeout = setTimeout(() => controller.abort(), 6000);
         const postRes = await fetch('/api/upload-media', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...getCmsAuthHeaders(),
+          },
           body: JSON.stringify({
             fileName: `poster-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
             dataUrl: result.dataUrl,
@@ -339,7 +373,10 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     } catch (err: any) {
       setUploadError(err?.message || 'Failed to process 9:16 poster cover upload.');
     } finally {
-      clearTimeout(safetyTimer);
+      if (posterTimerRef.current) {
+        clearTimeout(posterTimerRef.current);
+        posterTimerRef.current = null;
+      }
       setIsPosterCompressing(false);
       e.target.value = '';
     }
@@ -474,8 +511,8 @@ export const MediaControl: React.FC<MediaControlProps> = ({
             value={url}
             onChange={(e) => {
               const val = e.target.value;
-              const isImg = val.startsWith('data:image/') || val.endsWith('.png') || val.endsWith('.jpg') || val.endsWith('.webp');
-              const isVid = val.startsWith('data:video/') || val.endsWith('.mp4') || val.endsWith('.webm');
+              const isImg = isImageAssetUrl(val);
+              const isVid = isVideoAssetUrl(val);
               onChange({
                 url: val,
                 type: isImg ? 'image' : isVid ? 'video' : mediaType,
@@ -592,12 +629,18 @@ export const MediaControl: React.FC<MediaControlProps> = ({
                 key={asset.url}
                 type="button"
                 onClick={() => {
-                  onChange({ url: asset.url, type: asset.type as any });
+                  onChange({ url: asset.url, type: asset.type as 'image' | 'video' });
                   setShowPresets(false);
                 }}
                 className={`flex items-center gap-1.5 text-left p-1 rounded hover:bg-white/10 transition cursor-pointer ${url === asset.url ? 'bg-[#2563EB]/30 border border-[#2563EB]/40' : ''}`}
               >
-                <img src={asset.url} alt="" className="size-6 rounded object-cover" />
+                {asset.type === 'video' ? (
+                  <span className="size-6 shrink-0 rounded bg-[#2563EB]/20 border border-[#2563EB]/40 flex items-center justify-center">
+                    <Video className="size-3.5 text-[#38BDF8]" />
+                  </span>
+                ) : (
+                  <img src={asset.url} alt="" className="size-6 shrink-0 rounded object-cover" />
+                )}
                 <span className="truncate text-[10px] text-white/90">{asset.label}</span>
               </button>
             ))}

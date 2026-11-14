@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { Lock, Sliders } from 'lucide-react';
 import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
@@ -7,7 +7,11 @@ export const Footer: React.FC = () => {
   const {
     siteData,
     isAuthorized,
+    isPasscodeModalOpen,
+    openPasscodeModal,
+    closePasscodeModal,
     toggleEditor,
+    openEditor,
     authorize,
   } = useSiteContent();
   const device = useEffectiveDevice();
@@ -15,23 +19,38 @@ export const Footer: React.FC = () => {
   const navLinks = siteData.navLinks;
   const contact = siteData.contact;
 
-  const [promptOpen, setPromptOpen] = useState(false);
   const [passcode, setPasscode] = useState('');
   const [errorMsg, setErrorMsg] = useState(false);
+
+  useEffect(() => {
+    if (!isPasscodeModalOpen) {
+      setPasscode('');
+      setErrorMsg(false);
+      return;
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closePasscodeModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPasscodeModalOpen, closePasscodeModal]);
 
   const handleAdminClick = () => {
     if (isAuthorized) {
       toggleEditor();
     } else {
-      setPromptOpen(true);
+      openPasscodeModal();
     }
   };
 
   const handlePasscodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (authorize(passcode)) {
-      setPromptOpen(false);
-      toggleEditor();
+      closePasscodeModal();
+      openEditor('hero');
+      setPasscode('');
       setErrorMsg(false);
     } else {
       setErrorMsg(true);
@@ -158,13 +177,24 @@ export const Footer: React.FC = () => {
         </div>
       </div>
 
-      {/* Discreet Passcode Modal */}
-      {promptOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[#161B22] p-6 text-white shadow-2xl">
-            <h3 className="font-display font-bold text-base mb-1">SGS Studio Access</h3>
+      {/* Unified Accessible Passcode Modal (triggered from Footer lock or Ctrl+Shift+E) */}
+      {isPasscodeModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cms-passcode-title"
+          onClick={closePasscodeModal}
+          className="fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl border border-white/10 bg-[#161B22] p-6 text-white shadow-2xl"
+          >
+            <h3 id="cms-passcode-title" className="font-display font-bold text-base mb-1">
+              SGS Studio Access
+            </h3>
             <p className="text-xs text-[#94A3B8] mb-4">
-              Enter authorized administrator passcode to open visual editor.
+              Enter authorized administrator passcode to open the visual CMS editor.
             </p>
 
             <form onSubmit={handlePasscodeSubmit} className="space-y-3">
@@ -172,19 +202,25 @@ export const Footer: React.FC = () => {
                 type="password"
                 autoFocus
                 value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                placeholder="Passcode (default: sgs2026)"
+                onChange={(e) => {
+                  setPasscode(e.target.value);
+                  if (errorMsg) setErrorMsg(false);
+                }}
+                placeholder="Enter studio passcode"
+                aria-label="Administrator passcode"
                 className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2.5 min-h-[44px] text-base sm:text-sm text-white focus:border-[#2563EB] focus:outline-none"
               />
 
               {errorMsg && (
-                <p className="text-xs text-red-400">Invalid passcode. Please try again.</p>
+                <p role="alert" className="text-xs text-red-400">
+                  Invalid passcode. Please try again.
+                </p>
               )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setPromptOpen(false)}
+                  onClick={closePasscodeModal}
                   className="rounded-lg px-3 py-2 min-h-[40px] text-xs text-white/60 hover:text-white cursor-pointer"
                 >
                   Cancel

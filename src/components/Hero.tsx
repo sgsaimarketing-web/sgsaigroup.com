@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowRight, Play, ImageOff } from 'lucide-react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { EditableBlock } from './editor/EditableBlock.tsx';
@@ -19,12 +19,21 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
   const hero = siteData.hero;
   const config = siteData.config;
   const [imageError, setImageError] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
   const isSimulatedDevice =
     isAuthorized && isEditorOpen && (previewDevice === 'tablet' || previewDevice === 'mobile');
 
   const heroImage = hero.backgroundImage || config.heroImage;
-  const isVideo = !!hero.backgroundVideo;
+  const isVideo = Boolean(hero.backgroundVideo) && !videoError;
+
+  useEffect(() => {
+    setImageError(false);
+  }, [heroImage]);
+
+  useEffect(() => {
+    setVideoError(false);
+  }, [hero.backgroundVideo]);
 
   const resolvedMedia = resolveMediaForDevice(
     device,
@@ -134,10 +143,12 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
           {isVideo ? (
             <video
               src={hero.backgroundVideo}
+              poster={heroImage}
               autoPlay
               loop
               muted
               playsInline
+              onError={() => setVideoError(true)}
               className={`h-full w-full ${fitClass} ${focalClass}`}
             />
           ) : !imageError ? (
@@ -195,11 +206,23 @@ export const Hero: React.FC<HeroProps> = ({ onOpenShowreel }) => {
             <h1
               className={`mt-4 sm:mt-6 font-display font-black uppercase ${titleClass} text-white [text-wrap:balance]`}
             >
-              <span className="block hero-line">{hero.headlineLines[0] || 'WE BUILD WHAT'}</span>
-              <span className="block hero-line text-white/95">{hero.headlineLines[1] || 'MOVES BUSINESS'}</span>
-              <span className="block hero-line text-[#38BDF8]">
-                {hero.headlineLines[2] || 'FORWARD.'}
-              </span>
+              {(hero.headlineLines && hero.headlineLines.length > 0
+                ? hero.headlineLines
+                : ['WE BUILD WHAT', 'MOVES BUSINESS', 'FORWARD.']
+              ).map((line, idx, arr) => (
+                <span
+                  key={`${idx}-${line}`}
+                  className={`block hero-line ${
+                    idx === arr.length - 1
+                      ? 'text-[#38BDF8]'
+                      : idx === 1
+                      ? 'text-white/95'
+                      : ''
+                  }`}
+                >
+                  {line}
+                </span>
+              ))}
             </h1>
 
             {/* Subtitle Paragraph */}

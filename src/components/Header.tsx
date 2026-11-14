@@ -17,12 +17,21 @@ export const Header: React.FC = () => {
     isAuthorized && isEditorOpen && (previewDevice === 'tablet' || previewDevice === 'mobile');
 
   useEffect(() => {
-    const handleScroll = () => {
+    let rafId = 0;
+    const sectionIds = ['home', 'about', 'industries', 'expertise', 'our-work', 'contact'];
+
+    const updateScrollState = () => {
+      rafId = 0;
       setScrolled(window.scrollY > 25);
 
-      const sectionIds = ['home', 'about', 'industries', 'expertise', 'our-work', 'contact'];
-      const scrollPos = window.scrollY + 140;
+      const nearBottom =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 24;
+      if (nearBottom) {
+        setActiveSection('contact');
+        return;
+      }
 
+      const scrollPos = window.scrollY + 140;
       for (let i = sectionIds.length - 1; i >= 0; i--) {
         const el = document.getElementById(sectionIds[i]);
         if (el && el.offsetTop <= scrollPos) {
@@ -32,8 +41,18 @@ export const Header: React.FC = () => {
       }
     };
 
+    const handleScroll = () => {
+      if (rafId === 0) {
+        rafId = window.requestAnimationFrame(updateScrollState);
+      }
+    };
+
+    updateScrollState();
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (rafId !== 0) window.cancelAnimationFrame(rafId);
+    };
   }, []);
 
   useEffect(() => {

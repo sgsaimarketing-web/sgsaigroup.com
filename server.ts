@@ -18,6 +18,18 @@ import {
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
+const CMS_PASSCODE = process.env.CMS_PASSCODE || 'sgs2026';
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB limit
+const ALLOWED_UPLOAD_EXTS = new Set([
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.webp',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+]);
 
 // Ensure required directories exist
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -35,7 +47,25 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 let contentVersion = Date.now().toString();
 const sseClients = new Set<Response>();
 
-function broadcastUpdate(data: any, version: string) {
+function isAuthorizedCmsRequest(req: Request): boolean {
+  const headerToken = typeof req.headers['x-cms-auth'] === 'string' ? req.headers['x-cms-auth'].trim() : '';
+  const bodyToken = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
+  const token = headerToken || bodyToken;
+  return token === CMS_PASSCODE || token === 'sgs';
+}
+
+function requireCmsAuth(req: Request, res: Response, next: NextFunction): void {
+  if (!isAuthorizedCmsRequest(req)) {
+    res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Valid CMS authentication header required.',
+    });
+    return;
+  }
+  next();
+}
+
+function broadcastUpdate(data: unknown, version: string) {
   const payload = `data: ${JSON.stringify({ type: 'content_update', version, timestamp: Date.now(), data })}\n\n`;
   for (const client of sseClients) {
     try {
@@ -44,6 +74,12 @@ function broadcastUpdate(data: any, version: string) {
       sseClients.delete(client);
     }
   }
+}
+
+function atomicWriteFileSync(targetPath: string, content: string | Buffer): void {
+  const tempPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
+  fs.writeFileSync(tempPath, content);
+  fs.renameSync(tempPath, targetPath);
 }
 
 // Default baseline data in case file is absent
@@ -71,22 +107,19 @@ function loadContentFromDisk() {
   } catch (err) {
     console.warn('Error reading data/site-content.json, resetting to defaults:', err);
   }
-  // Initialize with baseline data
-  fs.writeFileSync(DATA_FILE, JSON.stringify(DEFAULT_SITE_DATA, null, 2), 'utf-8');
+  atomicWriteFileSync(DATA_FILE, JSON.stringify(DEFAULT_SITE_DATA, null, 2));
   return DEFAULT_SITE_DATA;
 }
 
-// Save content atomically to disk (write to tmp file, then atomic rename)
+// Save content atomically to disk
 function saveContentToDisk(data: any) {
-  const tempFile = `${DATA_FILE}.tmp.${Date.now()}`;
-  fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tempFile, DATA_FILE);
+  atomicWriteFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 
-  // Sync to src/data/siteContent.ts for permanent repo synchronization
+  // Sync atomically to src/data/siteContent.ts for permanent repository parity
   try {
     const tsCode = generateSiteContentTs(data);
     const tsPath = path.resolve(process.cwd(), 'src/data/siteContent.ts');
-    fs.writeFileSync(tsPath, tsCode, 'utf-8');
+    atomicWriteFileSync(tsPath, tsCode);
   } catch (err) {
     console.warn('Warning syncing to src/data/siteContent.ts:', err);
   }
@@ -120,13 +153,16 @@ app.get('/api/content/stream', (req: Request, res: Response) => {
 
   sseClients.add(res);
 
-  // Send current state and version immediately upon connection
   const initialContent = loadContentFromDisk();
   res.write(`data: ${JSON.stringify({ type: 'init', version: contentVersion, timestamp: Date.now(), data: initialContent })}\n\n`);
 
-  // Heartbeat ping every 25 seconds
   const heartbeat = setInterval(() => {
-    res.write(': ping\n\n');
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
   }, 25000);
 
   req.on('close', () => {
@@ -149,25 +185,13 @@ app.get('/api/content', (req: Request, res: Response) => {
   });
 });
 
-// 3. POST /api/content - Auto-save / Save content live to server
-app.post('/api/content', (req: Request, res: Response) => {
-  const authHeader = (req.headers['x-cms-auth'] as string) || req.body?.passcode;
-  const isAuthorized =
-    authHeader === 'sgs2026' || authHeader === 'sgs' || req.headers['x-cms-bypass'] === 'local';
-
-  if (!isAuthorized) {
-    res.status(401).json({
-      success: false,
-      error: 'Unauthorized: Valid CMS passcode required (sgs2026).',
-    });
-    return;
-  }
-
+// 3. POST /api/content - Protected live CMS persistence
+app.post('/api/content', requireCmsAuth, (req: Request, res: Response) => {
   const payload = req.body?.content || req.body?.data || req.body;
-  if (!payload || typeof payload !== 'object' || !payload.hero || !payload.caseStudies) {
+  if (!payload || typeof payload !== 'object' || !payload.hero || !Array.isArray(payload.caseStudies)) {
     res.status(400).json({
       success: false,
-      error: 'Invalid payload: SiteData must contain hero, caseStudies, and configuration.',
+      error: 'Invalid payload: SiteData must contain hero and caseStudies array.',
     });
     return;
   }
@@ -188,12 +212,16 @@ app.post('/api/content', (req: Request, res: Response) => {
   }
 });
 
-// 4. Backwards compatible /api/save-content
-app.post('/api/save-content', (req: Request, res: Response) => {
+// 4. Protected Codebase Save Endpoint
+app.post('/api/save-content', requireCmsAuth, (req: Request, res: Response) => {
   if (req.body && typeof req.body.tsContent === 'string') {
+    if (!req.body.tsContent.includes('export const CASE_STUDIES')) {
+      res.status(400).json({ success: false, error: 'Invalid siteContent.ts payload.' });
+      return;
+    }
     try {
       const targetPath = path.resolve(process.cwd(), 'src/data/siteContent.ts');
-      fs.writeFileSync(targetPath, req.body.tsContent, 'utf-8');
+      atomicWriteFileSync(targetPath, req.body.tsContent);
       contentVersion = Date.now().toString();
       broadcastUpdate(loadContentFromDisk(), contentVersion);
       res.json({
@@ -203,54 +231,84 @@ app.post('/api/save-content', (req: Request, res: Response) => {
       });
       return;
     } catch (e: any) {
-      res.status(500).json({ success: false, error: e?.message });
+      res.status(500).json({ success: false, error: e?.message || 'Failed to save TypeScript content.' });
       return;
     }
   }
 
-  if (req.body && req.body.data) {
+  if (req.body && req.body.data && typeof req.body.data === 'object') {
     try {
       const v = saveContentToDisk(req.body.data);
       res.json({ success: true, version: v });
       return;
     } catch (e: any) {
-      res.status(500).json({ success: false, error: e?.message });
+      res.status(500).json({ success: false, error: e?.message || 'Failed to save data payload.' });
       return;
     }
   }
 
-  res.status(400).json({ success: false, error: 'Missing content in payload' });
+  res.status(400).json({ success: false, error: 'Missing valid content in payload.' });
 });
 
-// 5. Media Upload Handler (Streaming Binary & Base64 JSON)
-app.post('/api/upload-media', (req: Request, res: Response) => {
-  const customFileName = req.headers['x-file-name'] as string;
+// 5. Protected & Allowlist-Validated Media Upload Handler
+app.post('/api/upload-media', requireCmsAuth, (req: Request, res: Response) => {
+  const customFileName = typeof req.headers['x-file-name'] === 'string' ? req.headers['x-file-name'] : '';
 
   // Case A: Binary stream upload with x-file-name
   if (customFileName) {
-    const sanitized = customFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const sanitized = path.basename(customFileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const ext = path.extname(sanitized).toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+      res.status(400).json({
+        success: false,
+        error: `Unsupported file extension "${ext}". Allowed: image/video formats only.`,
+      });
+      return;
+    }
+
     const targetPath = path.join(UPLOADS_DIR, sanitized);
     const fileStream = fs.createWriteStream(targetPath);
+    let receivedBytes = 0;
+    let aborted = false;
+
+    req.on('data', (chunk: Buffer) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > MAX_UPLOAD_BYTES && !aborted) {
+        aborted = true;
+        req.unpipe(fileStream);
+        fileStream.destroy();
+        fs.unlink(targetPath, () => {});
+        if (!res.headersSent) {
+          res.status(413).json({ success: false, error: 'Upload exceeds 50MB maximum limit.' });
+        }
+      }
+    });
 
     req.on('error', (err) => {
       fileStream.destroy();
+      fs.unlink(targetPath, () => {});
       if (!res.headersSent) {
         res.status(500).json({ success: false, error: err.message });
       }
     });
 
     fileStream.on('finish', () => {
-      if (res.headersSent) return;
-      const stats = fs.statSync(targetPath);
-      res.json({
-        success: true,
-        url: `/assets/uploads/${sanitized}`,
-        size: stats.size,
-        name: sanitized,
-      });
+      if (aborted || res.headersSent) return;
+      try {
+        const stats = fs.statSync(targetPath);
+        res.json({
+          success: true,
+          url: `/assets/uploads/${sanitized}`,
+          size: stats.size,
+          name: sanitized,
+        });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err?.message || 'Upload stat failed.' });
+      }
     });
 
     fileStream.on('error', (err) => {
+      fs.unlink(targetPath, () => {});
       if (!res.headersSent) {
         res.status(500).json({ success: false, error: err.message });
       }
@@ -264,23 +322,37 @@ app.post('/api/upload-media', (req: Request, res: Response) => {
   const data = req.body;
   if (data && (data.dataUrl || data.base64)) {
     try {
-      const fileName = (data.fileName || `media-${Date.now()}.webp`).replace(/[^a-zA-Z0-9._-]/g, '_');
-      const targetPath = path.join(UPLOADS_DIR, fileName);
-
-      let fileBuffer: Buffer;
-      if (data.dataUrl && data.dataUrl.includes(';base64,')) {
-        const base64Data = data.dataUrl.split(';base64,').pop();
-        fileBuffer = Buffer.from(base64Data, 'base64');
-      } else {
-        fileBuffer = Buffer.from(data.base64, 'base64');
+      const rawName = typeof data.fileName === 'string' ? data.fileName : `media-${Date.now()}.webp`;
+      const sanitized = path.basename(rawName).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const ext = path.extname(sanitized).toLowerCase();
+      if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+        res.status(400).json({
+          success: false,
+          error: `Unsupported file extension "${ext}".`,
+        });
+        return;
       }
 
-      fs.writeFileSync(targetPath, fileBuffer);
+      const targetPath = path.join(UPLOADS_DIR, sanitized);
+      let fileBuffer: Buffer;
+      if (typeof data.dataUrl === 'string' && data.dataUrl.includes(';base64,')) {
+        const base64Data = data.dataUrl.split(';base64,').pop() || '';
+        fileBuffer = Buffer.from(base64Data, 'base64');
+      } else {
+        fileBuffer = Buffer.from(String(data.base64 || ''), 'base64');
+      }
+
+      if (fileBuffer.length === 0 || fileBuffer.length > MAX_UPLOAD_BYTES) {
+        res.status(400).json({ success: false, error: 'Invalid or oversized media payload.' });
+        return;
+      }
+
+      atomicWriteFileSync(targetPath, fileBuffer);
       res.json({
         success: true,
-        url: `/assets/uploads/${fileName}`,
+        url: `/assets/uploads/${sanitized}`,
         size: fileBuffer.length,
-        name: fileName,
+        name: sanitized,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || 'Server upload error' });
@@ -291,7 +363,7 @@ app.post('/api/upload-media', (req: Request, res: Response) => {
   res.status(400).json({ success: false, error: 'No media file or base64 data provided' });
 });
 
-// 6. HTTP Range Video Streaming Middleware for /assets/uploads
+// 6. Bounds-Checked HTTP Range Video Streaming Middleware for /assets/uploads
 app.use('/assets/uploads', (req: Request, res: Response, next: NextFunction) => {
   const fileName = path.basename((req.url || '').split('?')[0]);
   const filePath = path.join(UPLOADS_DIR, fileName);
@@ -301,10 +373,12 @@ app.use('/assets/uploads', (req: Request, res: Response, next: NextFunction) => 
     const mimeMap: Record<string, string> = {
       '.mp4': 'video/mp4',
       '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
       '.webp': 'image/webp',
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.png': 'image/png',
+      '.gif': 'image/gif',
       '.txt': 'text/plain',
     };
 
@@ -312,28 +386,64 @@ app.use('/assets/uploads', (req: Request, res: Response, next: NextFunction) => 
     res.setHeader('Accept-Ranges', 'bytes');
 
     const stat = fs.statSync(filePath);
+    const total = stat.size;
     const range = req.headers.range;
 
     if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (!match) {
+        res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        return;
+      }
+
+      let start = match[1] ? parseInt(match[1], 10) : NaN;
+      let end = match[2] ? parseInt(match[2], 10) : NaN;
+
+      if (Number.isNaN(start) && !Number.isNaN(end)) {
+        // Suffix byte range: bytes=-500
+        start = Math.max(0, total - end);
+        end = total - 1;
+      } else if (!Number.isNaN(start) && Number.isNaN(end)) {
+        end = total - 1;
+      }
+
+      if (
+        Number.isNaN(start) ||
+        Number.isNaN(end) ||
+        start < 0 ||
+        end >= total ||
+        start > end
+      ) {
+        res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        return;
+      }
+
       res.status(206);
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
       res.setHeader('Content-Length', end - start + 1);
-      fs.createReadStream(filePath, { start, end }).pipe(res);
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.on('error', () => {
+        if (!res.headersSent) res.status(500).end();
+        else res.end();
+      });
+      stream.pipe(res);
       return;
     }
 
-    res.setHeader('Content-Length', stat.size);
-    fs.createReadStream(filePath).pipe(res);
+    res.setHeader('Content-Length', total);
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
+    });
+    stream.pipe(res);
     return;
   }
 
   next();
 });
 
-// Also serve other static files from public/assets
+// Serve other static files from public/assets
 app.use('/assets', express.static(path.resolve(process.cwd(), 'public/assets')));
 
 // 7. Mount Vite in Dev or Serve Static dist in Production

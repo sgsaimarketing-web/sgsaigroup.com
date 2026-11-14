@@ -17,12 +17,14 @@ interface SelectedWorkProps {
   onSelectProject: (project: CaseStudy) => void;
   activeCategory?: string;
   onCategoryChange?: (categoryId: string) => void;
+  shouldPauseVideos?: boolean;
 }
 
 export const SelectedWork: React.FC<SelectedWorkProps> = ({
   onSelectProject,
   activeCategory: controlledCategory,
   onCategoryChange,
+  shouldPauseVideos = false,
 }) => {
   const { siteData } = useSiteContent();
   const device = useEffectiveDevice();
@@ -55,22 +57,30 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({
   const paddingClass = getSectionPaddingClass(device, layout.paddingY);
   const horizontalPad = device === 'mobile' ? 'px-5' : 'px-6 lg:px-8';
 
-  // Reset scroll and index when category changes
+  // Reset scroll, index, and active video playback when category changes
   useEffect(() => {
     setCarouselIndex(0);
+    setPlayingCardId(null);
     if (trackRef.current) {
       trackRef.current.scrollTo({ left: 0, behavior: 'smooth' });
     }
   }, [activeCategory]);
 
+  // Pause any inline playing card video when a theater modal opens
+  useEffect(() => {
+    if (shouldPauseVideos) {
+      setPlayingCardId(null);
+    }
+  }, [shouldPauseVideos]);
+
   const scrollToCard = (index: number) => {
-    if (!trackRef.current) return;
-    const cards = trackRef.current.children;
-    if (cards[index]) {
-      (cards[index] as HTMLElement).scrollIntoView({
+    const container = trackRef.current;
+    if (!container) return;
+    const card = container.children[index] as HTMLElement | undefined;
+    if (card) {
+      container.scrollTo({
+        left: Math.max(0, card.offsetLeft - container.offsetLeft),
         behavior: 'smooth',
-        block: 'nearest',
-        inline: 'start',
       });
     }
   };
@@ -324,6 +334,7 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({
                         playsInline
                         loop
                         muted={isCardMuted}
+                        onError={() => setPlayingCardId(null)}
                         className={`h-full w-full ${fitClass} ${focalClass}`}
                       />
                     ) : (

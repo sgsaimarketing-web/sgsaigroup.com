@@ -11,6 +11,7 @@ import {
   CASE_STUDIES,
   CONTACT_CONTENT,
 } from './siteContent.ts';
+import { isImageAssetUrl, isVideoAssetUrl } from '../utils/responsiveMedia.ts';
 
 test('site config contains verified SGS AI Group contact details and branding', () => {
   assert.equal(SITE_CONFIG.brandName, 'SGS AI Group');
@@ -118,4 +119,21 @@ test('all case study assets exist on disk and non-video posters are typed as ima
       }
     }
   }
+  checkAssetExists(HERO_CONTENT.backgroundImage);
+  checkAssetExists(SITE_CONFIG.heroImage);
+});
+
+test('media URL classifiers distinguish local image assets from video reels accurately', () => {
+  assert.equal(isImageAssetUrl('/assets/work/nelson-trading.png'), true);
+  assert.equal(isVideoAssetUrl('/assets/work/nelson-trading.png'), false);
+
+  assert.equal(isImageAssetUrl('/assets/work/biho-festive-poster.webp?v=2'), true);
+  assert.equal(isVideoAssetUrl('/assets/work/biho-festive-poster.webp?v=2'), false);
+
+  assert.equal(isVideoAssetUrl('/assets/nira-loop.mp4'), true);
+  assert.equal(isImageAssetUrl('/assets/nira-loop.mp4'), false);
+
+  assert.equal(isVideoAssetUrl('blob:https://example.com/123'), true);
+  assert.equal(isImageAssetUrl('data:image/webp;base64,AAAA'), true);
+  assert.equal(isVideoAssetUrl('data:image/webp;base64,AAAA'), false);
 });

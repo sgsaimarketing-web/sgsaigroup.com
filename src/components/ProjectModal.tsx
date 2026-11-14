@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -93,18 +93,18 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     ? currentCategoryProjects.findIndex((p) => p.id === project.id)
     : -1;
 
-  const handleNextProject = () => {
+  const handleNextProject = useCallback(() => {
     if (currentCategoryProjects.length <= 1) return;
     const nextIdx = (currentProjectIdx + 1) % currentCategoryProjects.length;
     onSelectProject(currentCategoryProjects[nextIdx]);
-  };
+  }, [currentCategoryProjects, currentProjectIdx, onSelectProject]);
 
-  const handlePrevProject = () => {
+  const handlePrevProject = useCallback(() => {
     if (currentCategoryProjects.length <= 1) return;
     const prevIdx =
       (currentProjectIdx - 1 + currentCategoryProjects.length) % currentCategoryProjects.length;
     onSelectProject(currentCategoryProjects[prevIdx]);
-  };
+  }, [currentCategoryProjects, currentProjectIdx, onSelectProject]);
 
   const defaultVideoUrl: string =
     project?.videoUrl && isVideoAssetUrl(project.videoUrl)
@@ -183,7 +183,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         ]
       : [];
 
-  const handleNextMedia = () => {
+  const handleNextMedia = useCallback(() => {
     if (galleryItems.length <= 1) return;
     setActiveMediaIndex((prev) => (prev + 1) % galleryItems.length);
     setIsPlayingVideo(false);
@@ -193,9 +193,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
-  };
+  }, [galleryItems.length]);
 
-  const handlePrevMedia = () => {
+  const handlePrevMedia = useCallback(() => {
     if (galleryItems.length <= 1) return;
     setActiveMediaIndex((prev) => (prev - 1 + galleryItems.length) % galleryItems.length);
     setIsPlayingVideo(false);
@@ -205,15 +205,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
-  };
+  }, [galleryItems.length]);
 
-  const toggleVideoPlayback = () => {
-    if (!videoRef.current) return;
-    if (isPlayingVideo) {
-      videoRef.current.pause();
+  const toggleVideoPlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!video.paused) {
+      video.pause();
       setIsPlayingVideo(false);
     } else {
-      videoRef.current
+      video
         .play()
         .then(() => {
           setIsPlayingVideo(true);
@@ -235,7 +236,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           }
         });
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!project) return;
@@ -263,8 +264,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         toggleVideoPlayback();
       } else if (e.key.toLowerCase() === 'm') {
         if (videoRef.current) {
-          videoRef.current.muted = !isMuted;
-          setIsMuted(!isMuted);
+          const nextMuted = !videoRef.current.muted;
+          videoRef.current.muted = nextMuted;
+          setIsMuted(nextMuted);
         }
       } else if (e.key.toLowerCase() === 'f') {
         setIsFullscreen((prev) => !prev);
@@ -273,7 +275,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [project, activeMediaIndex, isFullscreen, isMuted, isPlayingVideo, currentProjectIdx]);
+  }, [
+    project,
+    isFullscreen,
+    onClose,
+    handleNextMedia,
+    handlePrevMedia,
+    handleNextProject,
+    handlePrevProject,
+    toggleVideoPlayback,
+  ]);
 
   if (!project) return null;
 

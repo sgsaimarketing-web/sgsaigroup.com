@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   SITE_CONFIG,
   NAV_LINKS,
@@ -10,7 +10,6 @@ import {
   CASE_STUDIES,
   CONTACT_CONTENT,
   SiteConfig,
-  NavItem,
   HeroContent,
   WhoWeAreContent,
   IndustriesContent,
@@ -25,21 +24,14 @@ import {
   loadFromIndexedDB,
   removeFromIndexedDB,
   saveVideoBlob,
-  loadVideoBlob,
-  deleteVideoBlob,
   safeSetLocalStorage,
 } from '../utils/draftStorage.ts';
+import { isImageAssetUrl, isVideoAssetUrl } from '../utils/responsiveMedia.ts';
 
-export const CODEBASE_CONTENT_VERSION = '2026-11-11-v5-biho-alzara-mykaapie';
+export const CODEBASE_CONTENT_VERSION = '2026-11-13-v6-it-audit';
 const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v5';
-const VERSION_STORAGE_KEY = 'sgs_content_version_stamp';
 const AUTH_STORAGE_KEY = 'sgs_editor_authorized_v2';
-const LEGACY_STORAGE_KEYS = [
-  'sgs_site_content_draft_v1',
-  'sgs_site_content_draft_v2',
-  'sgs_site_content_draft_v3',
-  'sgs_site_content_draft_v4',
-];
+const AUTH_TOKEN_STORAGE_KEY = 'sgs_cms_auth_token_v1';
 
 export const DEFAULT_SITE_DATA: SiteData = {
   config: SITE_CONFIG,
@@ -55,25 +47,57 @@ export const DEFAULT_SITE_DATA: SiteData = {
 
 export function sanitizeCaseStudies(studies: CaseStudy[]): CaseStudy[] {
   return studies.map((p) => {
+    const validCover = isImageAssetUrl(p.coverImage)
+      ? p.coverImage
+      : isImageAssetUrl(p.posterUrl)
+      ? p.posterUrl!
+      : '/assets/work/nelson-trading.png';
+    const validPoster = isImageAssetUrl(p.posterUrl) ? p.posterUrl : validCover;
+
+    const sanitizedGallery = p.gallery?.map((g) => {
+      const isVid = isVideoAssetUrl(g.url);
+      const isImg = isImageAssetUrl(g.url);
+      return {
+        ...g,
+        type: isImg ? ('image' as const) : isVid ? ('video' as const) : g.type,
+        poster: isImageAssetUrl(g.poster) ? g.poster : validPoster,
+      };
+    });
+
     if (p.hasVideo) {
-      const isVid = (u?: string) =>
-        !!u && (u.endsWith('.mp4') || u.endsWith('.webm') || u.startsWith('blob:') || u.startsWith('data:video/') || u.startsWith('/assets/'));
-      const isImg = (u?: string) =>
-        !!u && (u.endsWith('.jpg') || u.endsWith('.png') || u.endsWith('.jpeg') || u.endsWith('.webp') || u.startsWith('data:image/') || u.startsWith('/assets/'));
-
-      const validVideoUrl = isVid(p.videoUrl) ? p.videoUrl : '/assets/nira-loop.mp4';
-      const validCover = isImg(p.coverImage) ? p.coverImage : (isImg(p.posterUrl) ? p.posterUrl! : '/assets/work/nelson-trading.png');
-      const validPoster = isImg(p.posterUrl) ? p.posterUrl : validCover;
-
+      const validVideoUrl = isVideoAssetUrl(p.videoUrl) ? p.videoUrl : '/assets/nira-loop.mp4';
       return {
         ...p,
         videoUrl: validVideoUrl,
         coverImage: validCover,
         posterUrl: validPoster,
+        gallery: sanitizedGallery,
       };
     }
-    return p;
+
+    return {
+      ...p,
+      coverImage: validCover,
+      posterUrl: validPoster,
+      gallery: sanitizedGallery,
+    };
   });
+}
+
+function hydrateSiteData(raw: Partial<SiteData> | null | undefined): SiteData {
+  const incoming = raw || {};
+  return {
+    ...DEFAULT_SITE_DATA,
+    ...incoming,
+    config: { ...DEFAULT_SITE_DATA.config, ...(incoming.config || {}) },
+    hero: { ...DEFAULT_SITE_DATA.hero, ...(incoming.hero || {}) },
+    whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(incoming.whoWeAre || {}) },
+    industries: { ...DEFAULT_SITE_DATA.industries, ...(incoming.industries || {}) },
+    expertise: { ...DEFAULT_SITE_DATA.expertise, ...(incoming.expertise || {}) },
+    contact: { ...DEFAULT_SITE_DATA.contact, ...(incoming.contact || {}) },
+    workCategories: incoming.workCategories || DEFAULT_SITE_DATA.workCategories,
+    caseStudies: sanitizeCaseStudies(incoming.caseStudies || DEFAULT_SITE_DATA.caseStudies),
+  };
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -95,6 +119,7 @@ interface ContentContextType {
   siteData: SiteData;
   isAuthorized: boolean;
   isEditorOpen: boolean;
+  isPasscodeModalOpen: boolean;
   isClickToEditActive: boolean;
   activeTab: EditorTab;
   previewDevice: PreviewDevice;
@@ -108,12 +133,15 @@ interface ContentContextType {
   openEditor: (tab?: EditorTab, projectId?: string | null) => void;
   closeEditor: () => void;
   toggleEditor: () => void;
+  openPasscodeModal: () => void;
+  closePasscodeModal: () => void;
   toggleClickToEdit: () => void;
   setActiveTab: (tab: EditorTab) => void;
   setPreviewDevice: (device: PreviewDevice) => void;
   setEditingProjectId: (id: string | null) => void;
   authorize: (passcode: string) => boolean;
   deauthorize: () => void;
+  getCmsAuthHeaders: () => Record<string, string>;
   // Updaters
   updateConfig: (patch: Partial<SiteConfig>) => void;
   updateHero: (patch: Partial<HeroContent>) => void;
@@ -145,7 +173,6 @@ interface ContentContextType {
 const ContentContext = createContext<ContentContextType | null>(null);
 
 export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Check authorization from URL query or localStorage
   const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
@@ -158,7 +185,6 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return hasParam || hasStoredAuth;
   });
 
-  // Base state starts with DEFAULT_SITE_DATA, then hydrates authoritatively from server
   const [siteData, setSiteDataState] = useState<SiteData>(DEFAULT_SITE_DATA);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -170,17 +196,53 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const params = new URLSearchParams(window.location.search);
     return params.get('open') === 'true' || params.get('edit') === 'true';
   });
+  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState<boolean>(false);
   const [isClickToEditActive, setIsClickToEditActive] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<EditorTab>('hero');
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('desktop');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
 
-  // Reference timestamp of latest local edit to avoid race conditions with SSE
-  const lastLocalEditTimestampRef = React.useRef<number>(0);
-  const isAutoSavingRef = React.useRef<boolean>(false);
-  const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSiteDataRef = useRef<SiteData>(siteData);
+  latestSiteDataRef.current = siteData;
 
-  // Check if current data has modifications compared to code defaults
+  const cmsAuthTokenRef = useRef<string>(
+    typeof window !== 'undefined'
+      ? localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || 'sgs2026'
+      : 'sgs2026'
+  );
+
+  const lastLocalEditTimestampRef = useRef<number>(0);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const createdBlobUrlsRef = useRef<Map<string, string>>(new Map());
+
+  const cancelPendingAutoSave = useCallback(() => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, []);
+
+  // Revoke any tracked blob object URLs & cancel pending timers on unmount
+  useEffect(() => {
+    return () => {
+      cancelPendingAutoSave();
+      for (const blobUrl of createdBlobUrlsRef.current.values()) {
+        try {
+          URL.revokeObjectURL(blobUrl);
+        } catch {
+          // ignore
+        }
+      }
+      createdBlobUrlsRef.current.clear();
+    };
+  }, [cancelPendingAutoSave]);
+
+  const getCmsAuthHeaders = useCallback((): Record<string, string> => {
+    return {
+      'x-cms-auth': cmsAuthTokenRef.current || 'sgs2026',
+    };
+  }, []);
+
   const isDraft = useMemo(() => {
     try {
       return JSON.stringify(siteData) !== JSON.stringify(DEFAULT_SITE_DATA);
@@ -200,19 +262,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (res.ok) {
           const json = await res.json();
           if (json && json.data && isMounted) {
-            const serverData = json.data;
-            const hydrated: SiteData = {
-              ...DEFAULT_SITE_DATA,
-              ...serverData,
-              config: { ...DEFAULT_SITE_DATA.config, ...(serverData.config || {}) },
-              hero: { ...DEFAULT_SITE_DATA.hero, ...(serverData.hero || {}) },
-              whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(serverData.whoWeAre || {}) },
-              industries: { ...DEFAULT_SITE_DATA.industries, ...(serverData.industries || {}) },
-              expertise: { ...DEFAULT_SITE_DATA.expertise, ...(serverData.expertise || {}) },
-              contact: { ...DEFAULT_SITE_DATA.contact, ...(serverData.contact || {}) },
-              workCategories: serverData.workCategories || DEFAULT_SITE_DATA.workCategories,
-              caseStudies: sanitizeCaseStudies(serverData.caseStudies || DEFAULT_SITE_DATA.caseStudies),
-            };
+            const hydrated = hydrateSiteData(json.data);
             setSiteDataState(hydrated);
             setSaveStatus('saved');
             setLastSavedAt(new Date());
@@ -225,15 +275,10 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.warn('Initial server fetch not available, checking local cache:', err);
       }
 
-      // Fallback: check IndexedDB or localStorage
       try {
         const idbDraft = await loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY);
         if (idbDraft && idbDraft.caseStudies && isMounted) {
-          setSiteDataState({
-            ...DEFAULT_SITE_DATA,
-            ...idbDraft,
-            caseStudies: sanitizeCaseStudies(idbDraft.caseStudies),
-          });
+          setSiteDataState(hydrateSiteData(idbDraft));
         }
       } catch (e) {
         console.warn('Local draft load error:', e);
@@ -247,7 +292,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
-  // 2. Real-time SSE cross-client updates (24/7 server sync)
+  // 2. Real-time SSE cross-client updates
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let evtSource: EventSource | null = null;
@@ -262,21 +307,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const parsed = JSON.parse(trimmed);
           if ((parsed.type === 'init' || parsed.type === 'content_update') && parsed.data) {
             const incomingTimestamp = parsed.timestamp || 0;
-            // Only update if incoming broadcast is newer than our local edits
             if (incomingTimestamp > lastLocalEditTimestampRef.current) {
-              const serverData = parsed.data;
-              const synced: SiteData = {
-                ...DEFAULT_SITE_DATA,
-                ...serverData,
-                config: { ...DEFAULT_SITE_DATA.config, ...(serverData.config || {}) },
-                hero: { ...DEFAULT_SITE_DATA.hero, ...(serverData.hero || {}) },
-                whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(serverData.whoWeAre || {}) },
-                industries: { ...DEFAULT_SITE_DATA.industries, ...(serverData.industries || {}) },
-                expertise: { ...DEFAULT_SITE_DATA.expertise, ...(serverData.expertise || {}) },
-                contact: { ...DEFAULT_SITE_DATA.contact, ...(serverData.contact || {}) },
-                workCategories: serverData.workCategories || DEFAULT_SITE_DATA.workCategories,
-                caseStudies: sanitizeCaseStudies(serverData.caseStudies || DEFAULT_SITE_DATA.caseStudies),
-              };
+              const synced = hydrateSiteData(parsed.data);
               setSiteDataState(synced);
               setSaveStatus('saved');
               setLastSavedAt(new Date(incomingTimestamp));
@@ -301,91 +333,101 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // 3. Direct Server Save Routine
   const saveToServer = useCallback(
     async (overrideData?: SiteData): Promise<{ success: boolean; message: string }> => {
-      const dataToSave = overrideData || siteData;
+      const dataToSave = overrideData || latestSiteDataRef.current;
       setSaveStatus('saving');
-      isAutoSavingRef.current = true;
 
       try {
         const res = await fetch('/api/content', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-cms-auth': 'sgs2026',
+            ...getCmsAuthHeaders(),
           },
           body: JSON.stringify({ content: dataToSave }),
         });
 
         if (res.ok) {
           setSaveStatus('saved');
-          const now = new Date();
-          setLastSavedAt(now);
+          setLastSavedAt(new Date());
           safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(dataToSave));
           saveToIndexedDB(DRAFT_STORAGE_KEY, dataToSave);
           return { success: true, message: 'Saved to server (24/7 live)' };
-        } else {
-          setSaveStatus('error');
-          return { success: false, message: 'Server responded with save error' };
         }
+        setSaveStatus('error');
+        return { success: false, message: 'Server responded with save error' };
       } catch (err: any) {
         setSaveStatus('error');
         return { success: false, message: err?.message || 'Network error saving to server' };
-      } finally {
-        isAutoSavingRef.current = false;
       }
     },
-    [siteData]
+    [getCmsAuthHeaders]
+  );
+
+  const persistSnapshot = useCallback(
+    (snapshot: SiteData) => {
+      cancelPendingAutoSave();
+      lastLocalEditTimestampRef.current = Date.now();
+      setSiteDataState(snapshot);
+      saveToIndexedDB(DRAFT_STORAGE_KEY, snapshot);
+      safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+      saveToServer(snapshot);
+    },
+    [cancelPendingAutoSave, saveToServer]
   );
 
   // 4. State mutation handler with History and Debounced Auto-Save
   const pushState = useCallback(
     (newState: SiteData) => {
+      const previous = latestSiteDataRef.current;
       lastLocalEditTimestampRef.current = Date.now();
-      setUndoStack((prev) => [...prev.slice(-25), siteData]);
+      setUndoStack((prev) => [...prev.slice(-25), previous]);
       setRedoStack([]);
       setSiteDataState(newState);
       setSaveStatus('saving');
 
-      // Local offline backup
       saveToIndexedDB(DRAFT_STORAGE_KEY, newState);
       safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(newState));
 
-      // Debounced 400ms auto-save to server backend
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
+      cancelPendingAutoSave();
       autoSaveTimerRef.current = setTimeout(() => {
+        autoSaveTimerRef.current = null;
         saveToServer(newState);
       }, 400);
     },
-    [siteData, saveToServer]
+    [cancelPendingAutoSave, saveToServer]
   );
 
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
     const previous = undoStack[undoStack.length - 1];
-    lastLocalEditTimestampRef.current = Date.now();
+    const current = latestSiteDataRef.current;
     setUndoStack((prev) => prev.slice(0, prev.length - 1));
-    setRedoStack((prev) => [...prev, siteData]);
-    setSiteDataState(previous);
-    saveToServer(previous);
-  }, [undoStack, siteData, saveToServer]);
+    setRedoStack((prev) => [...prev, current]);
+    persistSnapshot(previous);
+  }, [undoStack, persistSnapshot]);
 
   const redo = useCallback(() => {
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
-    lastLocalEditTimestampRef.current = Date.now();
+    const current = latestSiteDataRef.current;
     setRedoStack((prev) => prev.slice(0, prev.length - 1));
-    setUndoStack((prev) => [...prev, siteData]);
-    setSiteDataState(next);
-    saveToServer(next);
-  }, [redoStack, siteData, saveToServer]);
+    setUndoStack((prev) => [...prev, current]);
+    persistSnapshot(next);
+  }, [redoStack, persistSnapshot]);
 
   // Authorization helper
   const authorize = useCallback((passcode: string) => {
-    const valid = passcode.trim().toLowerCase() === 'sgs2026' || passcode.trim() === 'sgs';
+    const cleaned = passcode.trim();
+    const valid = cleaned.toLowerCase() === 'sgs2026' || cleaned === 'sgs';
     if (valid) {
+      cmsAuthTokenRef.current = cleaned.toLowerCase() === 'sgs2026' ? 'sgs2026' : cleaned;
       setIsAuthorized(true);
-      localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, cmsAuthTokenRef.current);
+      } catch {
+        // ignore storage restrictions
+      }
       return true;
     }
     return false;
@@ -395,19 +437,30 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsAuthorized(false);
     setIsEditorOpen(false);
     setIsClickToEditActive(false);
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setIsPasscodeModalOpen(false);
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
   }, []);
 
-  // Keyboard shortcut: Ctrl + Shift + E or Cmd + Shift + E
+  const openPasscodeModal = useCallback(() => {
+    setIsPasscodeModalOpen(true);
+  }, []);
+
+  const closePasscodeModal = useCallback(() => {
+    setIsPasscodeModalOpen(false);
+  }, []);
+
+  // Keyboard shortcut: Ctrl + Shift + E or Cmd + Shift + E (opens React modal instead of window.prompt)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault();
         if (!isAuthorized) {
-          const pass = window.prompt('SGS Studio CMS Access Code (default: sgs2026):');
-          if (pass && authorize(pass)) {
-            setIsEditorOpen(true);
-          }
+          setIsPasscodeModalOpen(true);
         } else {
           setIsEditorOpen((prev) => !prev);
         }
@@ -415,128 +468,139 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAuthorized, authorize]);
+  }, [isAuthorized]);
 
-  // Updaters
+  // Updaters read from latestSiteDataRef to avoid stale closures
   const updateConfig = useCallback(
     (patch: Partial<SiteConfig>) => {
-      pushState({ ...siteData, config: { ...siteData.config, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, config: { ...curr.config, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateHero = useCallback(
     (patch: Partial<HeroContent>) => {
-      pushState({ ...siteData, hero: { ...siteData.hero, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, hero: { ...curr.hero, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateWhoWeAre = useCallback(
     (patch: Partial<WhoWeAreContent>) => {
-      pushState({ ...siteData, whoWeAre: { ...siteData.whoWeAre, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, whoWeAre: { ...curr.whoWeAre, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateIndustries = useCallback(
     (patch: Partial<IndustriesContent>) => {
-      pushState({ ...siteData, industries: { ...siteData.industries, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, industries: { ...curr.industries, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateExpertise = useCallback(
     (patch: Partial<ExpertiseContent>) => {
-      pushState({ ...siteData, expertise: { ...siteData.expertise, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, expertise: { ...curr.expertise, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateWorkCategories = useCallback(
     (categories: WorkCategory[]) => {
-      pushState({ ...siteData, workCategories: categories });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, workCategories: categories });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateCaseStudies = useCallback(
     (studies: CaseStudy[]) => {
-      pushState({ ...siteData, caseStudies: studies });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, caseStudies: studies });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateSingleCaseStudy = useCallback(
     (id: string, patch: Partial<CaseStudy>) => {
-      const updated = siteData.caseStudies.map((cs) => (cs.id === id ? { ...cs, ...patch } : cs));
-      pushState({ ...siteData, caseStudies: updated });
+      const curr = latestSiteDataRef.current;
+      const updated = curr.caseStudies.map((cs) => (cs.id === id ? { ...cs, ...patch } : cs));
+      pushState({ ...curr, caseStudies: updated });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const addCaseStudy = useCallback(
     (study: CaseStudy) => {
-      pushState({ ...siteData, caseStudies: [study, ...siteData.caseStudies] });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, caseStudies: [study, ...curr.caseStudies] });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const deleteCaseStudy = useCallback(
     (id: string) => {
-      const updated = siteData.caseStudies.filter((cs) => cs.id !== id);
-      pushState({ ...siteData, caseStudies: updated });
+      const curr = latestSiteDataRef.current;
+      const updated = curr.caseStudies.filter((cs) => cs.id !== id);
+      pushState({ ...curr, caseStudies: updated });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const duplicateCaseStudy = useCallback(
     (id: string) => {
-      const target = siteData.caseStudies.find((cs) => cs.id === id);
+      const curr = latestSiteDataRef.current;
+      const target = curr.caseStudies.find((cs) => cs.id === id);
       if (!target) return;
       const clone: CaseStudy = {
         ...target,
         id: `${target.id}-copy-${Date.now().toString().slice(-4)}`,
         title: `${target.title} (Copy)`,
       };
-      pushState({ ...siteData, caseStudies: [...siteData.caseStudies, clone] });
+      pushState({ ...curr, caseStudies: [...curr.caseStudies, clone] });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const updateContact = useCallback(
     (patch: Partial<ContactContent>) => {
-      pushState({ ...siteData, contact: { ...siteData.contact, ...patch } });
+      const curr = latestSiteDataRef.current;
+      pushState({ ...curr, contact: { ...curr.contact, ...patch } });
     },
-    [siteData, pushState]
+    [pushState]
   );
 
   const saveDraft = useCallback(() => {
-    saveToServer(siteData);
-  }, [siteData, saveToServer]);
+    cancelPendingAutoSave();
+    saveToServer(latestSiteDataRef.current);
+  }, [cancelPendingAutoSave, saveToServer]);
 
   const resetToDefaults = useCallback(() => {
     removeFromIndexedDB(DRAFT_STORAGE_KEY);
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
-    } catch {}
-    setUndoStack((prev) => [...prev, siteData]);
+    } catch {
+      // ignore
+    }
+    setUndoStack((prev) => [...prev, latestSiteDataRef.current]);
     setRedoStack([]);
-    setSiteDataState(DEFAULT_SITE_DATA);
-    saveToServer(DEFAULT_SITE_DATA);
-  }, [siteData, saveToServer]);
+    persistSnapshot(DEFAULT_SITE_DATA);
+  }, [persistSnapshot]);
 
   const syncWithCodebase = useCallback(async () => {
+    cancelPendingAutoSave();
     try {
       const res = await fetch('/api/content');
       if (res.ok) {
         const json = await res.json();
         if (json && json.data) {
-          const fresh = {
-            ...DEFAULT_SITE_DATA,
-            ...json.data,
-            caseStudies: sanitizeCaseStudies(json.data.caseStudies || DEFAULT_SITE_DATA.caseStudies),
-          };
+          const fresh = hydrateSiteData(json.data);
           setUndoStack([]);
           setRedoStack([]);
           setSiteDataState(fresh);
@@ -544,24 +608,26 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return;
         }
       }
-    } catch {}
+    } catch {
+      // fallback below
+    }
 
     setUndoStack([]);
     setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
-  }, []);
+  }, [cancelPendingAutoSave]);
 
   const discardDraft = useCallback(() => {
     syncWithCodebase();
   }, [syncWithCodebase]);
 
   const exportTypeScriptCode = useCallback(() => {
-    return generateSiteContentTs(siteData);
-  }, [siteData]);
+    return generateSiteContentTs(latestSiteDataRef.current);
+  }, []);
 
   const exportJsonCode = useCallback(() => {
-    return JSON.stringify(siteData, null, 2);
-  }, [siteData]);
+    return JSON.stringify(latestSiteDataRef.current, null, 2);
+  }, []);
 
   const importJsonCode = useCallback(
     (jsonStr: string) => {
@@ -570,16 +636,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!parsed.hero || !parsed.whoWeAre || !parsed.caseStudies) {
           return { success: false, error: 'Invalid configuration format' };
         }
-        pushState({
-          ...DEFAULT_SITE_DATA,
-          ...parsed,
-          config: { ...DEFAULT_SITE_DATA.config, ...(parsed.config || {}) },
-          hero: { ...DEFAULT_SITE_DATA.hero, ...(parsed.hero || {}) },
-          whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(parsed.whoWeAre || {}) },
-          industries: { ...DEFAULT_SITE_DATA.industries, ...(parsed.industries || {}) },
-          expertise: { ...DEFAULT_SITE_DATA.expertise, ...(parsed.expertise || {}) },
-          contact: { ...DEFAULT_SITE_DATA.contact, ...(parsed.contact || {}) },
-        });
+        pushState(hydrateSiteData(parsed));
         return { success: true };
       } catch (err: any) {
         return { success: false, error: err?.message || 'JSON parsing failed' };
@@ -589,15 +646,17 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   const publishToCodebase = useCallback(async () => {
-    const tsCode = generateSiteContentTs(siteData);
+    const current = latestSiteDataRef.current;
+    const tsCode = generateSiteContentTs(current);
     try {
-      // 1. Commit to persistent server JSON
-      await saveToServer(siteData);
+      await saveToServer(current);
 
-      // 2. Commit to static src/data/siteContent.ts
       const res = await fetch('/api/save-content', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getCmsAuthHeaders(),
+        },
         body: JSON.stringify({ tsContent: tsCode }),
       });
 
@@ -610,8 +669,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         };
       }
       return {
-        success: true,
-        message: 'Saved 24/7 Live to Server',
+        success: false,
+        message: 'Authorization required or codebase write failed.',
       };
     } catch {
       return {
@@ -619,11 +678,12 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         message: 'Direct API writing not reachable in static mode.',
       };
     }
-  }, [siteData, saveToServer]);
+  }, [saveToServer, getCmsAuthHeaders]);
 
   const openEditor = useCallback((tab?: EditorTab, projectId?: string | null) => {
     setIsAuthorized(true);
     setIsEditorOpen(true);
+    setIsPasscodeModalOpen(false);
     if (tab) setActiveTab(tab);
     if (projectId !== undefined) setEditingProjectId(projectId);
   }, []);
@@ -643,7 +703,16 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const saveProjectVideoBlob = useCallback(
     async (projectId: string, blob: Blob): Promise<string> => {
       await saveVideoBlob(`video_blob_${projectId}`, blob);
+      const existingUrl = createdBlobUrlsRef.current.get(projectId);
+      if (existingUrl) {
+        try {
+          URL.revokeObjectURL(existingUrl);
+        } catch {
+          // ignore
+        }
+      }
       const liveUrl = URL.createObjectURL(blob);
+      createdBlobUrlsRef.current.set(projectId, liveUrl);
       updateSingleCaseStudy(projectId, {
         videoUrl: liveUrl,
         hasVideo: true,
@@ -659,6 +728,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         siteData,
         isAuthorized,
         isEditorOpen,
+        isPasscodeModalOpen,
         isClickToEditActive,
         activeTab,
         previewDevice,
@@ -671,12 +741,15 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         openEditor,
         closeEditor,
         toggleEditor,
+        openPasscodeModal,
+        closePasscodeModal,
         toggleClickToEdit,
         setActiveTab,
         setPreviewDevice,
         setEditingProjectId,
         authorize,
         deauthorize,
+        getCmsAuthHeaders,
         updateConfig,
         updateHero,
         updateWhoWeAre,
@@ -692,7 +765,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         undo,
         redo,
         saveDraft,
-        saveToServer: () => saveToServer(siteData),
+        saveToServer: () => saveToServer(latestSiteDataRef.current),
         resetToDefaults,
         discardDraft,
         exportTypeScriptCode,

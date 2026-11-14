@@ -234,8 +234,12 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-line,
-  .animate-rise {
+  .animate-rise,
+  .reveal {
     animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 

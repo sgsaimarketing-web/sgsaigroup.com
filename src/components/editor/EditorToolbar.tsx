@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useSiteContent, EditorTab } from '../../context/ContentContext.tsx';
 import {
   Monitor,
@@ -11,9 +11,6 @@ import {
   Download,
   X,
   Sparkles,
-  ChevronRight,
-  Maximize2,
-  Minimize2,
   RotateCcw,
   SlidersHorizontal,
   Check,
@@ -46,10 +43,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     undo,
     redo,
     saveDraft,
-    saveToServer,
     saveStatus,
-    lastSavedAt,
-    resetToDefaults,
     publishToCodebase,
     syncWithCodebase,
   } = useSiteContent();
@@ -59,31 +53,43 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const [isPublishingLive, setIsPublishingLive] = useState(false);
   const [publishLiveToast, setPublishLiveToast] = useState<string | null>(null);
 
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const publishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (publishTimerRef.current) clearTimeout(publishTimerRef.current);
+    };
+  }, []);
+
   if (!isAuthorized || !isEditorOpen) return null;
 
-  const handleManualSave = async () => {
+  const handleManualSave = () => {
     setSaveToast(true);
-    await saveDraft();
-    setTimeout(() => setSaveToast(false), 2000);
+    saveDraft();
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => setSaveToast(false), 2000);
   };
 
   const handleDirectPublishLive = async () => {
     setIsPublishingLive(true);
     setPublishLiveToast(null);
+    if (publishTimerRef.current) clearTimeout(publishTimerRef.current);
+
     try {
       const res = await publishToCodebase();
       setIsPublishingLive(false);
       if (res.success) {
         setPublishLiveToast('Live 24/7 on Site!');
-        setTimeout(() => setPublishLiveToast(null), 3000);
       } else {
         setPublishLiveToast('Publish Error');
-        setTimeout(() => setPublishLiveToast(null), 3000);
       }
+      publishTimerRef.current = setTimeout(() => setPublishLiveToast(null), 3000);
     } catch {
       setIsPublishingLive(false);
       setPublishLiveToast('Failed');
-      setTimeout(() => setPublishLiveToast(null), 2500);
+      publishTimerRef.current = setTimeout(() => setPublishLiveToast(null), 2500);
     }
   };
 

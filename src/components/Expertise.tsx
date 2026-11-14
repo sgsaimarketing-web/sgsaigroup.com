@@ -61,6 +61,15 @@ const CAPABILITY_ROUTING: Record<string, { categoryId: string; objective: string
   },
 };
 
+const ICON_CATEGORY_MAP: Record<string, string> = {
+  lightbulb: 'brand-campaigns',
+  chart: 'brand-campaigns',
+  video: 'packaging-experience',
+  cpu: 'ai-systems',
+  settings: 'ai-systems',
+  monitor: 'corporate-solutions',
+};
+
 export const Expertise: React.FC<ExpertiseProps> = ({
   onExploreCategory,
   onScopeObjective,
@@ -130,7 +139,9 @@ export const Expertise: React.FC<ExpertiseProps> = ({
                 const spanMarquee =
                   isMarquee && (device === 'laptop' || (device === 'tablet' && layout.columnsTablet === 2));
                 const routing = CAPABILITY_ROUTING[item.title] || {
-                  categoryId: idx >= 3 ? 'ai-systems' : 'brand-campaigns',
+                  categoryId:
+                    ICON_CATEGORY_MAP[item.iconName] ||
+                    (idx >= 3 ? 'ai-systems' : 'brand-campaigns'),
                   objective: item.title,
                 };
 

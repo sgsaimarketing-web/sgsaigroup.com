@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSiteContent } from '../../context/ContentContext.tsx';
 import {
   Download,
@@ -39,18 +39,51 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     message: string;
   } | null>(null);
 
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((t) => clearTimeout(t));
+      timersRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
-  const handleCopyTs = () => {
-    navigator.clipboard.writeText(exportTypeScriptCode());
-    setCopiedTs(true);
-    setTimeout(() => setCopiedTs(false), 2000);
+  const scheduleTimeout = (fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timersRef.current.push(id);
   };
 
-  const handleCopyJson = () => {
-    navigator.clipboard.writeText(exportJsonCode());
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
+  const handleCopyTs = async () => {
+    try {
+      await navigator.clipboard.writeText(exportTypeScriptCode());
+      setCopiedTs(true);
+      scheduleTimeout(() => setCopiedTs(false), 2000);
+    } catch {
+      setImportStatus('Clipboard unavailable in restricted browser context.');
+    }
+  };
+
+  const handleCopyJson = async () => {
+    try {
+      await navigator.clipboard.writeText(exportJsonCode());
+      setCopiedJson(true);
+      scheduleTimeout(() => setCopiedJson(false), 2000);
+    } catch {
+      setImportStatus('Clipboard unavailable in restricted browser context.');
+    }
   };
 
   const handleDownloadTs = () => {
@@ -89,7 +122,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     const res = importJsonCode(importText);
     if (res.success) {
       setImportStatus('Configuration successfully imported!');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         setImportStatus(null);
         onClose();
       }, 1500);
@@ -99,15 +132,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-      <div className="relative w-full max-w-2xl rounded-2xl border border-white/10 bg-[#101318] p-6 text-white shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-modal-title"
+      onClick={onClose}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-2xl rounded-2xl border border-white/10 bg-[#101318] p-6 text-white shadow-2xl"
+      >
         <div className="flex items-center justify-between pb-4 border-b border-white/10">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-[#2563EB]/20 text-[#2563EB]">
               <Server className="size-5" />
             </div>
             <div>
-              <h3 className="font-display text-lg font-bold">
+              <h3 id="export-modal-title" className="font-display text-lg font-bold">
                 Publish & Export Site Content
               </h3>
               <p className="text-xs text-[#94A3B8]">
@@ -118,7 +160,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition"
+            aria-label="Close export modal"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition cursor-pointer"
           >
             <X className="size-5" />
           </button>

@@ -44,13 +44,13 @@ export const Industries: React.FC<IndustriesProps> = ({ onSelectCategory }) => {
   const scrollToIndex = (idx: number) => {
     const nextIdx = Math.max(0, Math.min(idx, items.length - 1));
     setStartIndex(nextIdx);
-    if (scrollContainerRef.current) {
-      const card = scrollContainerRef.current.children[nextIdx] as HTMLElement;
+    const container = scrollContainerRef.current;
+    if (container) {
+      const card = container.children[nextIdx] as HTMLElement | undefined;
       if (card) {
-        card.scrollIntoView({
+        container.scrollTo({
+          left: Math.max(0, card.offsetLeft - container.offsetLeft),
           behavior: 'smooth',
-          block: 'nearest',
-          inline: 'start',
         });
       }
     }
@@ -210,6 +210,10 @@ export const Industries: React.FC<IndustriesProps> = ({ onSelectCategory }) => {
                       decoding="async"
                       width={480}
                       height={300}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = '/assets/nira-connected-earth.png';
+                      }}
                       className={`h-full w-full ${
                         resolvedMedia.fit === 'contain' ? 'object-contain bg-black' : 'object-cover'
                       } transition-transform duration-700 ease-out group-hover:scale-105 will-change-transform ${getFocalClass(

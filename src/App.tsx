@@ -61,17 +61,27 @@ function WebsiteContent() {
   };
 
   useEffect(() => {
-    // Subtle IntersectionObserver for restrained editorial reveals
+    const revealElements = Array.from(document.querySelectorAll('.reveal')) as HTMLElement[];
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) return;
+
+    if (prefersReducedMotion || isEditorOpen) {
+      revealElements.forEach((el) => {
+        el.dataset.revealed = 'true';
+        el.classList.add('opacity-100', 'translate-y-0');
+        el.classList.remove('opacity-0', 'translate-y-6');
+      });
+      return;
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            entry.target.classList.add('opacity-100', 'translate-y-0');
-            entry.target.classList.remove('opacity-0', 'translate-y-6');
-            observer.unobserve(entry.target);
+            const targetEl = entry.target as HTMLElement;
+            targetEl.dataset.revealed = 'true';
+            targetEl.classList.add('opacity-100', 'translate-y-0');
+            targetEl.classList.remove('opacity-0', 'translate-y-6');
+            observer.unobserve(targetEl);
           }
         });
       },
@@ -81,14 +91,18 @@ function WebsiteContent() {
       }
     );
 
-    const revealElements = document.querySelectorAll('.reveal');
     revealElements.forEach((el) => {
+      if (el.dataset.revealed === 'true') {
+        el.classList.add('opacity-100', 'translate-y-0');
+        el.classList.remove('opacity-0', 'translate-y-6');
+        return;
+      }
       el.classList.add('transition-all', 'duration-700', 'ease-out', 'opacity-0', 'translate-y-6');
       observer.observe(el);
     });
 
     return () => observer.disconnect();
-  }, [siteData]);
+  }, [isEditorOpen]);
 
   const isSimulatedDevice =
     isAuthorized && isEditorOpen && (previewDevice === 'tablet' || previewDevice === 'mobile');
@@ -167,6 +181,7 @@ function WebsiteContent() {
             activeCategory={activeWorkCategory}
             onCategoryChange={setActiveWorkCategory}
             onSelectProject={(project) => setSelectedProject(project)}
+            shouldPauseVideos={Boolean(selectedProject || showShowreel)}
           />
 
           {/* 06 — Contact: Verified Business Details & Direct Action Enquiry Form */}

@@ -135,6 +135,10 @@ export const WhoWeAre: React.FC = () => {
                         decoding="async"
                         width={600}
                         height={750}
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = '/assets/nira-official.png';
+                        }}
                         className={`h-full w-full ${
                           resolvedMedia.fit === 'contain' ? 'object-contain bg-black' : 'object-cover'
                         } transition-transform duration-700 ease-out group-hover:scale-105 opacity-90 group-hover:opacity-100 will-change-transform ${getFocalClass(
