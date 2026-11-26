@@ -220,11 +220,13 @@ export const Footer: React.FC = () => {
               </span>
             </div>
 
-            <p className="text-xs text-[#94A3B8] mb-4">
+            <p className="text-xs text-[#94A3B8] mb-4 leading-relaxed">
               {storageBackend === 'supabase'
                 ? 'Sign in with your authorized Supabase Admin email & password to edit and publish live.'
                 : serverAuthMode === 'setup_required'
                 ? 'First-run studio setup: choose an administrator passcode (minimum 6 characters).'
+                : serverAuthMode === 'env'
+                ? 'Enter the CMS_PASSCODE configured in environment secrets (or add VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY for Supabase Auth).'
                 : 'Enter your administrator passcode to open the visual CMS editor.'}
             </p>
 

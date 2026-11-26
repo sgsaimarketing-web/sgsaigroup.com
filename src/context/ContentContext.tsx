@@ -30,6 +30,7 @@ import {
 import { isImageAssetUrl, isVideoAssetUrl } from '../utils/responsiveMedia.ts';
 import {
   getSupabaseClient,
+  hydrateSupabaseFromRuntimeConfig,
   isSupabaseConfigured,
   SUPABASE_SITE_ROW_ID,
 } from '../lib/supabase.ts';
@@ -222,7 +223,9 @@ interface ContentContextType {
 const ContentContext = createContext<ContentContextType | null>(null);
 
 export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const storageBackend: StorageBackend = isSupabaseConfigured() ? 'supabase' : 'server';
+  const [storageBackend, setStorageBackend] = useState<StorageBackend>(() =>
+    isSupabaseConfigured() ? 'supabase' : 'server'
+  );
 
   const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
@@ -300,24 +303,92 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [siteData]);
 
   // Verify whether current Supabase user is in public.cms_admins
-  const verifySupabaseAdminUser = useCallback(async (email?: string | null): Promise<boolean> => {
-    const supabase = getSupabaseClient();
-    if (!supabase || !email) return false;
-    try {
-      const { data, error } = await supabase
-        .from('cms_admins')
-        .select('email')
-        .ilike('email', email)
-        .maybeSingle();
-      if (error) {
-        console.warn('Supabase cms_admins verification notice:', error.message);
-        return false;
+  const verifySupabaseAdminUser = useCallback(
+    async (email?: string | null): Promise<{ authorized: boolean; error?: string }> => {
+      const supabase = getSupabaseClient();
+      if (!supabase || !email) {
+        return { authorized: false, error: 'Missing Supabase session or email.' };
       }
-      return Boolean(data?.email);
+
+      try {
+        // Primary check: SECURITY DEFINER function is_cms_admin() (works reliably even if table-level SELECT grant on cms_admins is restricted)
+        const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_cms_admin');
+        if (!rpcError && typeof rpcIsAdmin === 'boolean') {
+          if (rpcIsAdmin) {
+            return { authorized: true };
+          }
+          return {
+            authorized: false,
+            error: `Account (${email}) is signed in, but is not listed in public.cms_admins.`,
+          };
+        }
+
+        // Fallback check: direct allowlist query
+        const { data, error } = await supabase
+          .from('cms_admins')
+          .select('email')
+          .ilike('email', email.trim())
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Supabase cms_admins verification error:', error.message);
+          if (error.code === '42501') {
+            return {
+              authorized: false,
+              error:
+                'Database permission error (42501): please re-run the updated supabase/schema.sql in Supabase SQL Editor to apply GRANT statements.',
+            };
+          }
+          return { authorized: false, error: error.message };
+        }
+
+        if (data?.email) {
+          return { authorized: true };
+        }
+        return {
+          authorized: false,
+          error: `Account (${email}) is signed in, but is not listed in public.cms_admins.`,
+        };
+      } catch (err: any) {
+        return {
+          authorized: false,
+          error: err?.message || 'Unable to verify administrator privileges.',
+        };
+      }
+    },
+    []
+  );
+
+  const refreshRuntimeConfigAndAuth = useCallback(async () => {
+    const hasSupabase = await hydrateSupabaseFromRuntimeConfig();
+    if (hasSupabase) {
+      setStorageBackend('supabase');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/status', { cache: 'no-store' });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json?.mode === 'env' || json?.mode === 'claimed' || json?.mode === 'setup_required') {
+        setServerAuthMode(json.mode);
+      }
     } catch {
-      return false;
+      setServerAuthMode('unknown');
     }
   }, []);
+
+  // Hydrate runtime Supabase config on mount (for AI Studio Secrets)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    void refreshRuntimeConfigAndAuth();
+  }, [refreshRuntimeConfigAndAuth]);
+
+  // Re-check auth mode & config whenever the sign-in modal opens
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isPasscodeModalOpen) return;
+    void refreshRuntimeConfigAndAuth();
+  }, [isPasscodeModalOpen, refreshRuntimeConfigAndAuth]);
 
   // Auth initialization (Supabase Auth listener or Local Server /api/auth/status)
   useEffect(() => {
@@ -332,9 +403,9 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!isMounted) return;
         const email = session?.user?.email || null;
         if (session && email) {
-          const isAdmin = await verifySupabaseAdminUser(email);
+          const check = await verifySupabaseAdminUser(email);
           if (!isMounted) return;
-          if (isAdmin) {
+          if (check.authorized) {
             setIsAuthorized(true);
             setAdminEmail(email);
           } else {
@@ -362,19 +433,6 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         subscription.unsubscribe();
       };
     }
-
-    // Local Express server mode
-    fetch('/api/auth/status')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
-        if (!isMounted || !json) return;
-        if (json.mode === 'env' || json.mode === 'claimed' || json.mode === 'setup_required') {
-          setServerAuthMode(json.mode);
-        }
-      })
-      .catch(() => {
-        if (isMounted) setServerAuthMode('unknown');
-      });
 
     return () => {
       isMounted = false;
@@ -419,7 +477,14 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
               .eq('id', SUPABASE_SITE_ROW_ID)
               .maybeSingle();
 
-            if (!error && row?.data && isMounted) {
+            if (error) {
+              console.warn('Supabase site_content hydration warning:', error.code, error.message);
+              if (error.code === '42501' && isMounted) {
+                setSaveErrorMessage(
+                  'Supabase table permissions missing (42501). Run updated supabase/schema.sql in Supabase SQL Editor.'
+                );
+              }
+            } else if (row?.data && isMounted) {
               const hydrated = hydrateSiteData(row.data as Partial<SiteData>);
               setSiteDataState(hydrated);
               setSaveStatus('saved');
@@ -584,9 +649,13 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         );
 
         if (error) {
+          const friendlyError =
+            error.code === '42501'
+              ? 'Database permission denied (42501). Run updated supabase/schema.sql in Supabase SQL Editor.'
+              : error.message;
           setSaveStatus('error');
-          setSaveErrorMessage(error.message);
-          return { success: false, message: `Supabase save failed: ${error.message}` };
+          setSaveErrorMessage(friendlyError);
+          return { success: false, message: `Supabase save failed: ${friendlyError}` };
         }
 
         setSaveStatus('saved');
@@ -709,12 +778,13 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       const signedEmail = data.user?.email || trimmedEmail;
-      const isAdmin = await verifySupabaseAdminUser(signedEmail);
-      if (!isAdmin) {
+      const check = await verifySupabaseAdminUser(signedEmail);
+      if (!check.authorized) {
         await supabase.auth.signOut();
         return {
           success: false,
           error:
+            check.error ||
             'Account signed in, but email is not listed in public.cms_admins (or supabase/schema.sql has not been executed yet).',
         };
       }
@@ -725,35 +795,6 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     },
     [verifySupabaseAdminUser]
   );
-
-  // Local Express Server First-Time Passcode Setup
-  const setupAdminPasscode = useCallback(async (passcode: string): Promise<AuthResult> => {
-    const cleaned = passcode.trim();
-    if (cleaned.length < 6) {
-      return { success: false, error: 'Passcode must be at least 6 characters.' };
-    }
-
-    try {
-      const res = await fetch('/api/auth/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passcode: cleaned }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.token) {
-        return { success: false, error: data?.error || 'Failed to save admin passcode.' };
-      }
-      cmsSessionTokenRef.current = data.token;
-      setServerAuthMode('claimed');
-      setIsAuthorized(true);
-      return { success: true };
-    } catch {
-      return {
-        success: false,
-        error: 'Local server is unavailable on static hosting. Configure Supabase environment variables to sign in.',
-      };
-    }
-  }, []);
 
   // Local Express Server Passcode Login
   const authorizePasscode = useCallback(async (passcode: string): Promise<AuthResult> => {
@@ -785,6 +826,45 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     }
   }, []);
+
+  // Local Express Server First-Time Passcode Setup
+  const setupAdminPasscode = useCallback(
+    async (passcode: string): Promise<AuthResult> => {
+      const cleaned = passcode.trim();
+      if (cleaned.length < 6) {
+        return { success: false, error: 'Passcode must be at least 6 characters.' };
+      }
+
+      try {
+        const res = await fetch('/api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode: cleaned }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.status === 409) {
+          const nextMode: ServerAuthMode =
+            data?.mode === 'env' || data?.mode === 'claimed' ? data.mode : 'claimed';
+          setServerAuthMode(nextMode);
+          // Automatically attempt login with the entered passcode
+          return authorizePasscode(cleaned);
+        }
+        if (!res.ok || !data?.token) {
+          return { success: false, error: data?.error || 'Failed to save admin passcode.' };
+        }
+        cmsSessionTokenRef.current = data.token;
+        setServerAuthMode('claimed');
+        setIsAuthorized(true);
+        return { success: true };
+      } catch {
+        return {
+          success: false,
+          error: 'Local server is unavailable on static hosting. Configure Supabase environment variables to sign in.',
+        };
+      }
+    },
+    [authorizePasscode]
+  );
 
   const deauthorize = useCallback(async () => {
     cmsSessionTokenRef.current = null;
@@ -1037,11 +1117,14 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const supabase = getSupabaseClient();
       if (supabase) {
         const { data: sessionData } = await supabase.auth.getSession();
-        await supabase.from('site_content_versions').insert({
+        const { error: versionError } = await supabase.from('site_content_versions').insert({
           content_id: SUPABASE_SITE_ROW_ID,
           data: cleanSnapshot,
           created_by: sessionData.session?.user?.email || adminEmail || 'admin',
         });
+        if (versionError) {
+          console.warn('Supabase version snapshot warning:', versionError.message);
+        }
       }
 
       return {

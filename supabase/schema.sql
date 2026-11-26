@@ -102,6 +102,18 @@ create policy "Only CMS admins can insert version history"
   to authenticated
   with check (public.is_cms_admin());
 
+-- Explicit PostgreSQL role privileges (required alongside RLS on newer Supabase projects)
+grant usage on schema public to anon, authenticated;
+
+grant select on public.cms_admins to authenticated;
+grant execute on function public.is_cms_admin() to anon, authenticated;
+
+grant select on public.site_content to anon, authenticated;
+grant insert, update, delete on public.site_content to authenticated;
+
+grant select, insert on public.site_content_versions to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 -- 4. Enable Realtime Cross-Device Updates on site_content
 do $$
 begin

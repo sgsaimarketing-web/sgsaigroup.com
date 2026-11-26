@@ -238,8 +238,54 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   next(err);
 });
 
-// 0. Local Express Admin Auth Endpoints (used when Supabase is not configured)
+function normalizePublicSupabaseUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      parsed.protocol === 'https:' &&
+      /^[a-z0-9-]+\.supabase\.(co|in|net)$/i.test(parsed.hostname)
+    ) {
+      return parsed.origin;
+    }
+    if (parsed.protocol === 'https:' && parsed.hostname === 'supabase.com') {
+      const match = parsed.pathname.match(/^\/dashboard\/project\/([a-z0-9-]+)/i);
+      if (match?.[1]) {
+        return `https://${match[1]}.supabase.co`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return trimmed;
+}
+
+// 0. Public Client Config (only scoped browser-safe Supabase URL/Anon Key, never secrets)
+app.get('/api/public-config', (_req: Request, res: Response) => {
+  const supabaseUrl = normalizePublicSupabaseUrl(
+    process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      ''
+  );
+  const supabaseAnonKey = (
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({
+    success: true,
+    supabaseUrl,
+    supabaseAnonKey,
+    serverAuthMode: getServerAuthMode(),
+  });
+});
+
+// 0b. Local Express Admin Auth Endpoints (used when Supabase is not configured)
 app.get('/api/auth/status', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({
     success: true,
     mode: getServerAuthMode(),
@@ -248,10 +294,12 @@ app.get('/api/auth/status', (req: Request, res: Response) => {
 });
 
 app.post('/api/auth/setup', (req: Request, res: Response) => {
-  if (getServerAuthMode() !== 'setup_required') {
+  const currentMode = getServerAuthMode();
+  if (currentMode !== 'setup_required') {
     res.status(409).json({
       success: false,
-      error: 'Admin passcode is already configured. Please sign in instead.',
+      mode: currentMode,
+      error: 'Admin passcode is already configured. Please enter your passcode to sign in.',
     });
     return;
   }
