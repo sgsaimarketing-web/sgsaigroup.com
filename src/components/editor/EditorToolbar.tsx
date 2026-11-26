@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Check,
   RefreshCw,
+  LogOut,
 } from 'lucide-react';
 import { ExportModal } from './ExportModal.tsx';
 
@@ -28,11 +29,14 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   isDrawerOpen,
 }) => {
   const {
+    storageBackend,
+    adminEmail,
     isAuthorized,
     isEditorOpen,
     isClickToEditActive,
     toggleClickToEdit,
     closeEditor,
+    deauthorize,
     activeTab,
     setActiveTab,
     previewDevice,
@@ -44,6 +48,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     redo,
     saveDraft,
     saveStatus,
+    saveErrorMessage,
     publishToCodebase,
     syncWithCodebase,
   } = useSiteContent();
@@ -81,7 +86,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       const res = await publishToCodebase();
       setIsPublishingLive(false);
       if (res.success) {
-        setPublishLiveToast('Live 24/7 on Site!');
+        setPublishLiveToast(storageBackend === 'supabase' ? 'Published to Supabase!' : 'Live 24/7 on Site!');
       } else {
         setPublishLiveToast('Publish Error');
       }
@@ -112,18 +117,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               SGS Studio
             </span>
             <span className="text-xs font-semibold text-white/80 hidden sm:inline">
-              Visual CMS Editor
+              Visual CMS
             </span>
           </div>
 
           <div className="h-4 w-[1px] bg-white/10 hidden sm:block" />
 
-          {/* 24/7 Live Server Auto-Save indicator */}
-          <div className="flex items-center gap-1.5 text-[11px] font-mono">
+          {/* Persistent Storage Status Indicator */}
+          <div
+            className="flex items-center gap-1.5 text-[11px] font-mono"
+            title={saveErrorMessage || (adminEmail ? `Signed in as ${adminEmail}` : undefined)}
+          >
             {saveStatus === 'saving' ? (
               <>
                 <RefreshCw className="size-3 text-sky-400 animate-spin" />
-                <span className="text-sky-300 hidden md:inline">Syncing to Server...</span>
+                <span className="text-sky-300 hidden md:inline">
+                  {storageBackend === 'supabase' ? 'Syncing Supabase...' : 'Syncing Server...'}
+                </span>
               </>
             ) : saveStatus === 'error' ? (
               <>
@@ -134,7 +144,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <>
                 <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
                 <span className="text-emerald-300 hidden md:inline">
-                  24/7 Live Saved
+                  {storageBackend === 'supabase' ? 'Supabase Live' : 'Local Server Saved'}
                 </span>
               </>
             )}
@@ -322,6 +332,19 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition cursor-pointer"
           >
             <Download className="size-3.5" />
+          </button>
+
+          {/* Sign Out */}
+          <button
+            type="button"
+            onClick={() => {
+              void deauthorize();
+            }}
+            title={adminEmail ? `Sign out (${adminEmail})` : 'Lock & Sign Out'}
+            aria-label="Sign out of CMS"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-300 transition cursor-pointer"
+          >
+            <LogOut className="size-4" />
           </button>
 
           {/* Exit / Close */}

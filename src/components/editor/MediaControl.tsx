@@ -17,6 +17,7 @@ import {
   isVideoAssetUrl,
   mapPreviewDeviceToBreakpoint,
 } from '../../utils/responsiveMedia.ts';
+import { uploadCmsMediaFile, uploadDataUrlAsset } from '../../lib/mediaUpload.ts';
 
 interface MediaControlProps {
   label: string;
@@ -89,7 +90,7 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   const { previewDevice, setPreviewDevice, getCmsAuthHeaders } = useSiteContent();
   const [showPresets, setShowPresets] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [compressingLabel, setCompressingLabel] = useState('Compressing...');
+  const [compressingLabel, setCompressingLabel] = useState('Uploading...');
   const [isPosterCompressing, setIsPosterCompressing] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [compressionBadge, setCompressionBadge] = useState<string | null>(null);
@@ -97,13 +98,9 @@ export const MediaControl: React.FC<MediaControlProps> = ({
   const [editingTarget, setEditingTarget] = useState<'base' | DeviceBreakpoint>('base');
 
   const localBlobUrlRef = useRef<string | null>(null);
-  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const posterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
-      if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
-      if (posterTimerRef.current) clearTimeout(posterTimerRef.current);
       if (localBlobUrlRef.current) {
         try {
           URL.revokeObjectURL(localBlobUrlRef.current);
@@ -183,145 +180,78 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setUploadError(null);
     setCompressionBadge(null);
 
-    if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
-    safetyTimerRef.current = setTimeout(() => {
-      setIsCompressing(false);
-    }, 15000);
-
     try {
       const isVideo =
         file.type.startsWith('video/') ||
         /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
 
       if (isVideo) {
-        setCompressingLabel('Loading Video...');
+        if (file.size > 50 * 1024 * 1024) {
+          throw new Error(
+            `Video (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds 50MB bucket limit. Please compress below 50MB before uploading.`
+          );
+        }
+
+        const sizeKb = Math.round(file.size / 1024);
+        setCompressingLabel('Uploading Video...');
+        setCompressionBadge(`Uploading (${sizeKb}KB)...`);
+
+        if (onVideoFileSelect) {
+          onVideoFileSelect(file);
+        }
+
+        const result = await uploadCmsMediaFile(file, {
+          fileName: file.name,
+          folder: 'videos',
+          contentType: file.type || 'video/mp4',
+          authHeaders: getCmsAuthHeaders(),
+        });
+
         if (localBlobUrlRef.current) {
           try {
             URL.revokeObjectURL(localBlobUrlRef.current);
           } catch {
             // ignore
           }
+          localBlobUrlRef.current = null;
         }
-        const localStreamUrl = URL.createObjectURL(file);
-        localBlobUrlRef.current = localStreamUrl;
+
         onChange({
-          url: localStreamUrl,
+          url: result.url,
           type: 'video',
         });
 
-        if (onVideoFileSelect) {
-          onVideoFileSelect(file);
-        }
-
-        const sizeKb = Math.round(file.size / 1024);
-        setCompressionBadge(`Local Stream Active (${sizeKb}KB) - Syncing to Server...`);
-
-        setCompressingLabel('Saving to Server...');
-        try {
-          const controller = new AbortController();
-          const abortTimeout = setTimeout(() => controller.abort(), 12000);
-          const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const uploadName = `${Date.now()}-${sanitized}`;
-
-          const uploadRes = await fetch('/api/upload-media', {
-            method: 'POST',
-            headers: {
-              'x-file-name': uploadName,
-              'content-type': file.type || 'video/mp4',
-              ...getCmsAuthHeaders(),
-            },
-            body: file,
-            signal: controller.signal,
-          });
-          clearTimeout(abortTimeout);
-
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            if (uploadData.url) {
-              onChange({
-                url: uploadData.url,
-                type: 'video',
-              });
-              if (localBlobUrlRef.current === localStreamUrl) {
-                try {
-                  URL.revokeObjectURL(localStreamUrl);
-                } catch {
-                  // ignore
-                }
-                localBlobUrlRef.current = null;
-              }
-              setCompressionBadge(`✓ Saved to Public Server (${sizeKb}KB)`);
-            }
-          } else {
-            const errJson = await uploadRes.json().catch(() => null);
-            setCompressionBadge(`✓ Local Stream Active (${sizeKb}KB)`);
-            if (errJson?.error) {
-              setUploadError(`Server upload notice: ${errJson.error}`);
-            }
-          }
-        } catch (serverErr) {
-          console.warn('Server media upload bypassed, retaining active local stream:', serverErr);
-          setCompressionBadge(`✓ Local Stream & Cache Active (${sizeKb}KB)`);
-        }
+        setCompressionBadge(
+          result.provider === 'supabase'
+            ? `✓ Saved to Supabase CDN (${sizeKb}KB)`
+            : `✓ Saved to Server (${sizeKb}KB)`
+        );
       } else {
-        setCompressingLabel('Compressing WebP...');
+        setCompressingLabel('Optimizing WebP...');
         const result: CompressionResult = await processMediaUpload(file, 1600, 1600, 0.82);
 
+        setCompressingLabel('Uploading Image...');
+        const uploaded = await uploadDataUrlAsset(result.dataUrl, {
+          fileName: `img-${file.name.replace(/\.[^.]+$/, '')}.webp`,
+          folder: 'images',
+          authHeaders: getCmsAuthHeaders(),
+        });
+
         onChange({
-          url: result.dataUrl,
+          url: uploaded.url,
           type: 'image',
         });
 
-        let finalImageUrl = result.dataUrl;
-        try {
-          const controller = new AbortController();
-          const abortTimeout = setTimeout(() => controller.abort(), 7000);
-          const imgRes = await fetch('/api/upload-media', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...getCmsAuthHeaders(),
-            },
-            body: JSON.stringify({
-              fileName: `img-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
-              dataUrl: result.dataUrl,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(abortTimeout);
-
-          if (imgRes.ok) {
-            const imgData = await imgRes.json();
-            if (imgData.url) {
-              finalImageUrl = imgData.url;
-              onChange({
-                url: finalImageUrl,
-                type: 'image',
-              });
-            }
-          }
-        } catch {
-          // Keep compressed WebP dataUrl
-        }
-
-        const savedPercent = Math.round(
-          ((result.originalSizeKb - result.compressedSizeKb) / Math.max(1, result.originalSizeKb)) * 100
-        );
         setCompressionBadge(
-          finalImageUrl && !finalImageUrl.startsWith('data:')
-            ? `✓ Public Server Asset (${result.compressedSizeKb}KB WebP)`
-            : savedPercent > 0
-            ? `✓ ${result.originalSizeKb}KB → ${result.compressedSizeKb}KB (-${savedPercent}% WebP)`
-            : `✓ ${result.compressedSizeKb}KB (WebP)`
+          uploaded.provider === 'supabase'
+            ? `✓ Saved to Supabase CDN (${result.compressedSizeKb}KB WebP)`
+            : `✓ Saved to Server (${result.compressedSizeKb}KB WebP)`
         );
       }
     } catch (err: any) {
-      setUploadError(err?.message || 'Failed to process media upload.');
+      setCompressionBadge(null);
+      setUploadError(err?.message || 'Failed to upload media permanently.');
     } finally {
-      if (safetyTimerRef.current) {
-        clearTimeout(safetyTimerRef.current);
-        safetyTimerRef.current = null;
-      }
       setIsCompressing(false);
       e.target.value = '';
     }
@@ -334,49 +264,22 @@ export const MediaControl: React.FC<MediaControlProps> = ({
     setIsPosterCompressing(true);
     setUploadError(null);
 
-    if (posterTimerRef.current) clearTimeout(posterTimerRef.current);
-    posterTimerRef.current = setTimeout(() => {
-      setIsPosterCompressing(false);
-    }, 10000);
-
     try {
       const result: CompressionResult = await processMediaUpload(file, 1080, 1920, 0.82);
-      onPosterChange(result.dataUrl);
-
-      // Upload 9:16 poster to server for permanent public display
-      try {
-        const controller = new AbortController();
-        const abortTimeout = setTimeout(() => controller.abort(), 6000);
-        const postRes = await fetch('/api/upload-media', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getCmsAuthHeaders(),
-          },
-          body: JSON.stringify({
-            fileName: `poster-${Date.now()}-${file.name.replace(/\.[^.]+$/, '')}.webp`,
-            dataUrl: result.dataUrl,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(abortTimeout);
-
-        if (postRes.ok) {
-          const postData = await postRes.json();
-          if (postData.url) {
-            onPosterChange(postData.url);
-          }
-        }
-      } catch (err) {
-        console.warn('Server poster upload unavailable, using optimized WebP dataUrl:', err);
-      }
+      const uploaded = await uploadDataUrlAsset(result.dataUrl, {
+        fileName: `poster-${file.name.replace(/\.[^.]+$/, '')}.webp`,
+        folder: 'posters',
+        authHeaders: getCmsAuthHeaders(),
+      });
+      onPosterChange(uploaded.url);
+      setCompressionBadge(
+        uploaded.provider === 'supabase'
+          ? `✓ Poster Saved to Supabase CDN (${result.compressedSizeKb}KB)`
+          : `✓ Poster Saved to Server (${result.compressedSizeKb}KB)`
+      );
     } catch (err: any) {
-      setUploadError(err?.message || 'Failed to process 9:16 poster cover upload.');
+      setUploadError(err?.message || 'Failed to upload 9:16 poster cover.');
     } finally {
-      if (posterTimerRef.current) {
-        clearTimeout(posterTimerRef.current);
-        posterTimerRef.current = null;
-      }
       setIsPosterCompressing(false);
       e.target.value = '';
     }

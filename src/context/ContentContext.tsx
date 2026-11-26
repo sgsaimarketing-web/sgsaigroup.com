@@ -24,14 +24,18 @@ import {
   loadFromIndexedDB,
   removeFromIndexedDB,
   saveVideoBlob,
+  loadVideoBlob,
   safeSetLocalStorage,
 } from '../utils/draftStorage.ts';
 import { isImageAssetUrl, isVideoAssetUrl } from '../utils/responsiveMedia.ts';
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  SUPABASE_SITE_ROW_ID,
+} from '../lib/supabase.ts';
 
-export const CODEBASE_CONTENT_VERSION = '2026-11-13-v6-it-audit';
+export const CODEBASE_CONTENT_VERSION = '2026-11-26-v7-supabase';
 const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v5';
-const AUTH_STORAGE_KEY = 'sgs_editor_authorized_v2';
-const AUTH_TOKEN_STORAGE_KEY = 'sgs_cms_auth_token_v1';
 
 export const DEFAULT_SITE_DATA: SiteData = {
   config: SITE_CONFIG,
@@ -45,27 +49,41 @@ export const DEFAULT_SITE_DATA: SiteData = {
   contact: CONTACT_CONTENT,
 };
 
-export function sanitizeCaseStudies(studies: CaseStudy[]): CaseStudy[] {
+function isEphemeralBlobUrl(url?: string): boolean {
+  return typeof url === 'string' && url.startsWith('blob:');
+}
+
+export function sanitizeCaseStudies(
+  studies: CaseStudy[],
+  activeBlobUrls?: Set<string>
+): CaseStudy[] {
   return studies.map((p) => {
     const validCover = isImageAssetUrl(p.coverImage)
       ? p.coverImage
       : isImageAssetUrl(p.posterUrl)
       ? p.posterUrl!
       : '/assets/work/nelson-trading.png';
-    const validPoster = isImageAssetUrl(p.posterUrl) ? p.posterUrl : validCover;
+    const validPoster: string =
+      isImageAssetUrl(p.posterUrl) && p.posterUrl ? p.posterUrl : validCover;
 
     const sanitizedGallery = p.gallery?.map((g) => {
-      const isVid = isVideoAssetUrl(g.url);
+      const urlIsLiveBlob = isEphemeralBlobUrl(g.url) && activeBlobUrls?.has(g.url);
+      const isVid = isVideoAssetUrl(g.url) && (!isEphemeralBlobUrl(g.url) || urlIsLiveBlob);
       const isImg = isImageAssetUrl(g.url);
       return {
         ...g,
+        url: isEphemeralBlobUrl(g.url) && !urlIsLiveBlob ? validPoster : g.url,
         type: isImg ? ('image' as const) : isVid ? ('video' as const) : g.type,
         poster: isImageAssetUrl(g.poster) ? g.poster : validPoster,
       };
     });
 
     if (p.hasVideo) {
-      const validVideoUrl = isVideoAssetUrl(p.videoUrl) ? p.videoUrl : '/assets/nira-loop.mp4';
+      const videoIsLiveBlob = isEphemeralBlobUrl(p.videoUrl) && activeBlobUrls?.has(p.videoUrl || '');
+      const validVideoUrl =
+        isVideoAssetUrl(p.videoUrl) && (!isEphemeralBlobUrl(p.videoUrl) || videoIsLiveBlob)
+          ? p.videoUrl
+          : '/assets/nira-loop.mp4';
       return {
         ...p,
         videoUrl: validVideoUrl,
@@ -84,23 +102,43 @@ export function sanitizeCaseStudies(studies: CaseStudy[]): CaseStudy[] {
   });
 }
 
-function hydrateSiteData(raw: Partial<SiteData> | null | undefined): SiteData {
+function hydrateSiteData(
+  raw: Partial<SiteData> | null | undefined,
+  activeBlobUrls?: Set<string>
+): SiteData {
   const incoming = raw || {};
+  const rawHero = { ...DEFAULT_SITE_DATA.hero, ...(incoming.hero || {}) };
+  if (isEphemeralBlobUrl(rawHero.backgroundVideo) && !activeBlobUrls?.has(rawHero.backgroundVideo || '')) {
+    rawHero.backgroundVideo = DEFAULT_SITE_DATA.hero.backgroundVideo;
+  }
+
   return {
     ...DEFAULT_SITE_DATA,
     ...incoming,
     config: { ...DEFAULT_SITE_DATA.config, ...(incoming.config || {}) },
-    hero: { ...DEFAULT_SITE_DATA.hero, ...(incoming.hero || {}) },
+    hero: rawHero,
     whoWeAre: { ...DEFAULT_SITE_DATA.whoWeAre, ...(incoming.whoWeAre || {}) },
     industries: { ...DEFAULT_SITE_DATA.industries, ...(incoming.industries || {}) },
     expertise: { ...DEFAULT_SITE_DATA.expertise, ...(incoming.expertise || {}) },
     contact: { ...DEFAULT_SITE_DATA.contact, ...(incoming.contact || {}) },
     workCategories: incoming.workCategories || DEFAULT_SITE_DATA.workCategories,
-    caseStudies: sanitizeCaseStudies(incoming.caseStudies || DEFAULT_SITE_DATA.caseStudies),
+    caseStudies: sanitizeCaseStudies(
+      incoming.caseStudies || DEFAULT_SITE_DATA.caseStudies,
+      activeBlobUrls
+    ),
   };
 }
 
+/**
+ * Strips any ephemeral browser-local blob: URLs before persisting to cloud or server storage.
+ */
+function sanitizeForRemotePersistence(data: SiteData): SiteData {
+  return hydrateSiteData(data, new Set<string>());
+}
+
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+export type StorageBackend = 'supabase' | 'server';
+export type ServerAuthMode = 'env' | 'claimed' | 'setup_required' | 'unknown';
 
 export type EditorTab =
   | 'hero'
@@ -115,8 +153,16 @@ export type EditorTab =
 
 export type PreviewDevice = 'desktop' | 'tablet' | 'mobile';
 
+interface AuthResult {
+  success: boolean;
+  error?: string;
+}
+
 interface ContentContextType {
   siteData: SiteData;
+  storageBackend: StorageBackend;
+  serverAuthMode: ServerAuthMode;
+  adminEmail: string | null;
   isAuthorized: boolean;
   isEditorOpen: boolean;
   isPasscodeModalOpen: boolean;
@@ -128,6 +174,7 @@ interface ContentContextType {
   canUndo: boolean;
   canRedo: boolean;
   saveStatus: SaveStatus;
+  saveErrorMessage: string | null;
   lastSavedAt: Date | null;
   // Controls
   openEditor: (tab?: EditorTab, projectId?: string | null) => void;
@@ -139,8 +186,10 @@ interface ContentContextType {
   setActiveTab: (tab: EditorTab) => void;
   setPreviewDevice: (device: PreviewDevice) => void;
   setEditingProjectId: (id: string | null) => void;
-  authorize: (passcode: string) => boolean;
-  deauthorize: () => void;
+  signInWithSupabase: (email: string, password: string) => Promise<AuthResult>;
+  authorizePasscode: (passcode: string) => Promise<AuthResult>;
+  setupAdminPasscode: (passcode: string) => Promise<AuthResult>;
+  deauthorize: () => Promise<void>;
   getCmsAuthHeaders: () => Record<string, string>;
   // Updaters
   updateConfig: (patch: Partial<SiteConfig>) => void;
@@ -173,30 +222,29 @@ interface ContentContextType {
 const ContentContext = createContext<ContentContextType | null>(null);
 
 export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    const hasParam =
-      params.get('edit') === 'true' ||
-      params.get('editor') === 'true' ||
-      params.get('cms') === 'true' ||
-      params.get('admin') === 'sgs';
-    const hasStoredAuth = localStorage.getItem(AUTH_STORAGE_KEY) === 'true';
-    return hasParam || hasStoredAuth;
-  });
+  const storageBackend: StorageBackend = isSupabaseConfigured() ? 'supabase' : 'server';
+
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [serverAuthMode, setServerAuthMode] = useState<ServerAuthMode>('unknown');
 
   const [siteData, setSiteDataState] = useState<SiteData>(DEFAULT_SITE_DATA);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
   const [undoStack, setUndoStack] = useState<SiteData[]>([]);
   const [redoStack, setRedoStack] = useState<SiteData[]>([]);
-  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(() => {
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
-    return params.get('open') === 'true' || params.get('edit') === 'true';
+    return (
+      params.get('edit') === 'true' ||
+      params.get('editor') === 'true' ||
+      params.get('cms') === 'true'
+    );
   });
-  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState<boolean>(false);
   const [isClickToEditActive, setIsClickToEditActive] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<EditorTab>('hero');
   const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('desktop');
@@ -205,15 +253,15 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const latestSiteDataRef = useRef<SiteData>(siteData);
   latestSiteDataRef.current = siteData;
 
-  const cmsAuthTokenRef = useRef<string>(
-    typeof window !== 'undefined'
-      ? localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || 'sgs2026'
-      : 'sgs2026'
-  );
-
+  // Held strictly in JS memory — never persisted to localStorage
+  const cmsSessionTokenRef = useRef<string | null>(null);
   const lastLocalEditTimestampRef = useRef<number>(0);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createdBlobUrlsRef = useRef<Map<string, string>>(new Map());
+
+  const getActiveBlobUrlSet = useCallback(() => {
+    return new Set<string>(createdBlobUrlsRef.current.values());
+  }, []);
 
   const cancelPendingAutoSave = useCallback(() => {
     if (autoSaveTimerRef.current) {
@@ -222,7 +270,6 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  // Revoke any tracked blob object URLs & cancel pending timers on unmount
   useEffect(() => {
     return () => {
       cancelPendingAutoSave();
@@ -238,8 +285,9 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [cancelPendingAutoSave]);
 
   const getCmsAuthHeaders = useCallback((): Record<string, string> => {
+    if (!cmsSessionTokenRef.current) return {};
     return {
-      'x-cms-auth': cmsAuthTokenRef.current || 'sgs2026',
+      Authorization: `Bearer ${cmsSessionTokenRef.current}`,
     };
   }, []);
 
@@ -251,52 +299,222 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [siteData]);
 
-  // 1. Authoritative initial server hydration
+  // Verify whether current Supabase user is in public.cms_admins
+  const verifySupabaseAdminUser = useCallback(async (email?: string | null): Promise<boolean> => {
+    const supabase = getSupabaseClient();
+    if (!supabase || !email) return false;
+    try {
+      const { data, error } = await supabase
+        .from('cms_admins')
+        .select('email')
+        .ilike('email', email)
+        .maybeSingle();
+      if (error) {
+        console.warn('Supabase cms_admins verification notice:', error.message);
+        return false;
+      }
+      return Boolean(data?.email);
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Auth initialization (Supabase Auth listener or Local Server /api/auth/status)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let isMounted = true;
 
-    async function hydrateFromServer() {
-      try {
-        const res = await fetch('/api/content');
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.data && isMounted) {
-            const hydrated = hydrateSiteData(json.data);
-            setSiteDataState(hydrated);
-            setSaveStatus('saved');
-            setLastSavedAt(new Date());
-            safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
-            saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
-            return;
+    if (storageBackend === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      const syncSession = async (session: any) => {
+        if (!isMounted) return;
+        const email = session?.user?.email || null;
+        if (session && email) {
+          const isAdmin = await verifySupabaseAdminUser(email);
+          if (!isMounted) return;
+          if (isAdmin) {
+            setIsAuthorized(true);
+            setAdminEmail(email);
+          } else {
+            setIsAuthorized(false);
+            setAdminEmail(null);
+          }
+        } else {
+          setIsAuthorized(false);
+          setAdminEmail(null);
+        }
+      };
+
+      supabase.auth.getSession().then(({ data }) => {
+        syncSession(data.session);
+      });
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        syncSession(session);
+      });
+
+      return () => {
+        isMounted = false;
+        subscription.unsubscribe();
+      };
+    }
+
+    // Local Express server mode
+    fetch('/api/auth/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!isMounted || !json) return;
+        if (json.mode === 'env' || json.mode === 'claimed' || json.mode === 'setup_required') {
+          setServerAuthMode(json.mode);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setServerAuthMode('unknown');
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [storageBackend, verifySupabaseAdminUser]);
+
+  // Recover any offline IndexedDB video blobs for local unsaved drafts
+  const rehydrateOfflineVideoBlobs = useCallback(async (candidate: SiteData): Promise<SiteData> => {
+    let changed = false;
+    const updatedStudies = await Promise.all(
+      candidate.caseStudies.map(async (proj) => {
+        if (proj.hasVideo && isEphemeralBlobUrl(proj.videoUrl)) {
+          const blob = await loadVideoBlob(`video_blob_${proj.id}`);
+          if (blob) {
+            const freshUrl = URL.createObjectURL(blob);
+            createdBlobUrlsRef.current.set(proj.id, freshUrl);
+            changed = true;
+            return { ...proj, videoUrl: freshUrl };
           }
         }
-      } catch (err) {
-        console.warn('Initial server fetch not available, checking local cache:', err);
+        return proj;
+      })
+    );
+    if (!changed) return candidate;
+    return { ...candidate, caseStudies: updatedStudies };
+  }, []);
+
+  // 1. Authoritative Initial Hydration (Supabase Postgres -> Local Express -> IndexedDB fallback)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let isMounted = true;
+
+    async function hydrateInitialContent() {
+      // Path A: Supabase Postgres (Production Cloudflare Pages & multi-device)
+      if (storageBackend === 'supabase') {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          try {
+            const { data: row, error } = await supabase
+              .from('site_content')
+              .select('data, updated_at')
+              .eq('id', SUPABASE_SITE_ROW_ID)
+              .maybeSingle();
+
+            if (!error && row?.data && isMounted) {
+              const hydrated = hydrateSiteData(row.data as Partial<SiteData>);
+              setSiteDataState(hydrated);
+              setSaveStatus('saved');
+              setLastSavedAt(row.updated_at ? new Date(row.updated_at) : new Date());
+              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
+              saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
+              return;
+            }
+          } catch (err) {
+            console.warn('Supabase content hydration unavailable, checking local cache:', err);
+          }
+        }
+      } else {
+        // Path B: Local Express Server
+        try {
+          const res = await fetch('/api/content');
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json.data && isMounted) {
+              const hydrated = hydrateSiteData(json.data);
+              setSiteDataState(hydrated);
+              setSaveStatus('saved');
+              setLastSavedAt(new Date());
+              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
+              saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Initial server fetch not available, checking local cache:', err);
+        }
       }
 
+      // Path C: Offline IndexedDB draft recovery (with binary video blob rehydration)
       try {
         const idbDraft = await loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY);
         if (idbDraft && idbDraft.caseStudies && isMounted) {
-          setSiteDataState(hydrateSiteData(idbDraft));
+          const recovered = await rehydrateOfflineVideoBlobs(idbDraft);
+          if (isMounted) {
+            setSiteDataState(hydrateSiteData(recovered, getActiveBlobUrlSet()));
+          }
         }
       } catch (e) {
         console.warn('Local draft load error:', e);
       }
     }
 
-    hydrateFromServer();
+    hydrateInitialContent();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [storageBackend, rehydrateOfflineVideoBlobs, getActiveBlobUrlSet]);
 
-  // 2. Real-time SSE cross-client updates
+  // 2. Real-Time Cross-Device Sync (Supabase Realtime or Local Server SSE)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    let evtSource: EventSource | null = null;
 
+    if (storageBackend === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      const channel = supabase
+        .channel('sgs-site-content-live')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'site_content',
+            filter: `id=eq.${SUPABASE_SITE_ROW_ID}`,
+          },
+          (payload) => {
+            const nextRow = payload.new as { data?: Partial<SiteData>; updated_at?: string } | null;
+            if (!nextRow?.data) return;
+            const incomingTs = nextRow.updated_at ? Date.parse(nextRow.updated_at) : Date.now();
+            if (incomingTs > lastLocalEditTimestampRef.current + 1500) {
+              const synced = hydrateSiteData(nextRow.data);
+              setSiteDataState(synced);
+              setSaveStatus('saved');
+              setLastSavedAt(new Date(incomingTs));
+              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(synced));
+              saveToIndexedDB(DRAFT_STORAGE_KEY, synced);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+
+    // Local Express SSE stream
+    let evtSource: EventSource | null = null;
     try {
       evtSource = new EventSource('/api/content/stream');
       evtSource.onmessage = (event) => {
@@ -328,14 +546,57 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         evtSource.close();
       }
     };
-  }, []);
+  }, [storageBackend]);
 
-  // 3. Direct Server Save Routine
+  // 3. Authoritative Remote Persistence (Supabase Postgres or Local Express)
   const saveToServer = useCallback(
     async (overrideData?: SiteData): Promise<{ success: boolean; message: string }> => {
-      const dataToSave = overrideData || latestSiteDataRef.current;
+      const rawSnapshot = overrideData || latestSiteDataRef.current;
+      const cleanSnapshot = sanitizeForRemotePersistence(rawSnapshot);
       setSaveStatus('saving');
+      setSaveErrorMessage(null);
 
+      // Path A: Supabase Postgres Persistence
+      if (storageBackend === 'supabase') {
+        const supabase = getSupabaseClient();
+        if (!supabase) {
+          setSaveStatus('error');
+          setSaveErrorMessage('Supabase client not configured.');
+          return { success: false, message: 'Supabase client not configured.' };
+        }
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          setSaveStatus('error');
+          setSaveErrorMessage('Sign in as Supabase admin to save live.');
+          return { success: false, message: 'Sign in required before saving live.' };
+        }
+
+        const nowIso = new Date().toISOString();
+        const { error } = await supabase.from('site_content').upsert(
+          {
+            id: SUPABASE_SITE_ROW_ID,
+            data: cleanSnapshot,
+            updated_at: nowIso,
+            updated_by: sessionData.session.user?.email || adminEmail || 'admin',
+          },
+          { onConflict: 'id' }
+        );
+
+        if (error) {
+          setSaveStatus('error');
+          setSaveErrorMessage(error.message);
+          return { success: false, message: `Supabase save failed: ${error.message}` };
+        }
+
+        setSaveStatus('saved');
+        setLastSavedAt(new Date(nowIso));
+        safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(cleanSnapshot));
+        saveToIndexedDB(DRAFT_STORAGE_KEY, cleanSnapshot);
+        return { success: true, message: 'Saved live to Supabase Postgres' };
+      }
+
+      // Path B: Local Express Server
       try {
         const res = await fetch('/api/content', {
           method: 'POST',
@@ -343,24 +604,34 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             'Content-Type': 'application/json',
             ...getCmsAuthHeaders(),
           },
-          body: JSON.stringify({ content: dataToSave }),
+          body: JSON.stringify({ content: cleanSnapshot }),
         });
 
         if (res.ok) {
           setSaveStatus('saved');
           setLastSavedAt(new Date());
-          safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(dataToSave));
-          saveToIndexedDB(DRAFT_STORAGE_KEY, dataToSave);
-          return { success: true, message: 'Saved to server (24/7 live)' };
+          safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(cleanSnapshot));
+          saveToIndexedDB(DRAFT_STORAGE_KEY, cleanSnapshot);
+          return { success: true, message: 'Saved to local Express server' };
         }
+
+        const errData = await res.json().catch(() => null);
+        const msg =
+          errData?.error ||
+          (res.status === 404
+            ? 'Static host detected — connect Supabase to persist changes globally.'
+            : `Save failed (HTTP ${res.status})`);
         setSaveStatus('error');
-        return { success: false, message: 'Server responded with save error' };
+        setSaveErrorMessage(msg);
+        return { success: false, message: msg };
       } catch (err: any) {
+        const msg = err?.message || 'Network error saving content';
         setSaveStatus('error');
-        return { success: false, message: err?.message || 'Network error saving to server' };
+        setSaveErrorMessage(msg);
+        return { success: false, message: msg };
       }
     },
-    [getCmsAuthHeaders]
+    [storageBackend, adminEmail, getCmsAuthHeaders]
   );
 
   const persistSnapshot = useCallback(
@@ -375,7 +646,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [cancelPendingAutoSave, saveToServer]
   );
 
-  // 4. State mutation handler with History and Debounced Auto-Save
+  // 4. State mutation handler with Undo/Redo & Debounced Cloud Auto-Save
   const pushState = useCallback(
     (newState: SiteData) => {
       const previous = latestSiteDataRef.current;
@@ -392,7 +663,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       autoSaveTimerRef.current = setTimeout(() => {
         autoSaveTimerRef.current = null;
         saveToServer(newState);
-      }, 400);
+      }, 450);
     },
     [cancelPendingAutoSave, saveToServer]
   );
@@ -415,36 +686,121 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     persistSnapshot(next);
   }, [redoStack, persistSnapshot]);
 
-  // Authorization helper
-  const authorize = useCallback((passcode: string) => {
-    const cleaned = passcode.trim();
-    const valid = cleaned.toLowerCase() === 'sgs2026' || cleaned === 'sgs';
-    if (valid) {
-      cmsAuthTokenRef.current = cleaned.toLowerCase() === 'sgs2026' ? 'sgs2026' : cleaned;
-      setIsAuthorized(true);
-      try {
-        localStorage.setItem(AUTH_STORAGE_KEY, 'true');
-        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, cmsAuthTokenRef.current);
-      } catch {
-        // ignore storage restrictions
+  // Supabase Email + Password Sign-In
+  const signInWithSupabase = useCallback(
+    async (email: string, password: string): Promise<AuthResult> => {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        return { success: false, error: 'Supabase environment variables are not configured yet.' };
       }
-      return true;
+
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail || !password) {
+        return { success: false, error: 'Please enter both admin email and password.' };
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      const signedEmail = data.user?.email || trimmedEmail;
+      const isAdmin = await verifySupabaseAdminUser(signedEmail);
+      if (!isAdmin) {
+        await supabase.auth.signOut();
+        return {
+          success: false,
+          error:
+            'Account signed in, but email is not listed in public.cms_admins (or supabase/schema.sql has not been executed yet).',
+        };
+      }
+
+      setIsAuthorized(true);
+      setAdminEmail(signedEmail);
+      return { success: true };
+    },
+    [verifySupabaseAdminUser]
+  );
+
+  // Local Express Server First-Time Passcode Setup
+  const setupAdminPasscode = useCallback(async (passcode: string): Promise<AuthResult> => {
+    const cleaned = passcode.trim();
+    if (cleaned.length < 6) {
+      return { success: false, error: 'Passcode must be at least 6 characters.' };
     }
-    return false;
+
+    try {
+      const res = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode: cleaned }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.token) {
+        return { success: false, error: data?.error || 'Failed to save admin passcode.' };
+      }
+      cmsSessionTokenRef.current = data.token;
+      setServerAuthMode('claimed');
+      setIsAuthorized(true);
+      return { success: true };
+    } catch {
+      return {
+        success: false,
+        error: 'Local server is unavailable on static hosting. Configure Supabase environment variables to sign in.',
+      };
+    }
   }, []);
 
-  const deauthorize = useCallback(() => {
+  // Local Express Server Passcode Login
+  const authorizePasscode = useCallback(async (passcode: string): Promise<AuthResult> => {
+    const cleaned = passcode.trim();
+    if (!cleaned) {
+      return { success: false, error: 'Please enter your administrator passcode.' };
+    }
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode: cleaned }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.token) {
+        if (data?.mode === 'setup_required') {
+          setServerAuthMode('setup_required');
+        }
+        return { success: false, error: data?.error || 'Invalid administrator passcode.' };
+      }
+      cmsSessionTokenRef.current = data.token;
+      setIsAuthorized(true);
+      return { success: true };
+    } catch {
+      return {
+        success: false,
+        error: 'Local server unreachable. Connect Supabase (VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY) for static hosting.',
+      };
+    }
+  }, []);
+
+  const deauthorize = useCallback(async () => {
+    cmsSessionTokenRef.current = null;
     setIsAuthorized(false);
+    setAdminEmail(null);
     setIsEditorOpen(false);
     setIsClickToEditActive(false);
     setIsPasscodeModalOpen(false);
-    try {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    } catch {
-      // ignore
+
+    if (storageBackend === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase.auth.signOut().catch(() => {});
+      }
     }
-  }, []);
+  }, [storageBackend]);
 
   const openPasscodeModal = useCallback(() => {
     setIsPasscodeModalOpen(true);
@@ -454,7 +810,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsPasscodeModalOpen(false);
   }, []);
 
-  // Keyboard shortcut: Ctrl + Shift + E or Cmd + Shift + E (opens React modal instead of window.prompt)
+  // Keyboard shortcut: Ctrl + Shift + E or Cmd + Shift + E
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
@@ -470,7 +826,6 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAuthorized]);
 
-  // Updaters read from latestSiteDataRef to avoid stale closures
   const updateConfig = useCallback(
     (patch: Partial<SiteConfig>) => {
       const curr = latestSiteDataRef.current;
@@ -595,38 +950,62 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const syncWithCodebase = useCallback(async () => {
     cancelPendingAutoSave();
-    try {
-      const res = await fetch('/api/content');
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.data) {
-          const fresh = hydrateSiteData(json.data);
-          setUndoStack([]);
-          setRedoStack([]);
-          setSiteDataState(fresh);
-          setSaveStatus('saved');
-          return;
+
+    if (storageBackend === 'supabase') {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data: row, error } = await supabase
+            .from('site_content')
+            .select('data')
+            .eq('id', SUPABASE_SITE_ROW_ID)
+            .maybeSingle();
+          if (!error && row?.data) {
+            const fresh = hydrateSiteData(row.data as Partial<SiteData>);
+            setUndoStack([]);
+            setRedoStack([]);
+            setSiteDataState(fresh);
+            setSaveStatus('saved');
+            return;
+          }
+        } catch {
+          // fallback below
         }
       }
-    } catch {
-      // fallback below
+    } else {
+      try {
+        const res = await fetch('/api/content');
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.data) {
+            const fresh = hydrateSiteData(json.data);
+            setUndoStack([]);
+            setRedoStack([]);
+            setSiteDataState(fresh);
+            setSaveStatus('saved');
+            return;
+          }
+        }
+      } catch {
+        // fallback below
+      }
     }
 
     setUndoStack([]);
     setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
-  }, [cancelPendingAutoSave]);
+  }, [cancelPendingAutoSave, storageBackend]);
 
   const discardDraft = useCallback(() => {
     syncWithCodebase();
   }, [syncWithCodebase]);
 
   const exportTypeScriptCode = useCallback(() => {
-    return generateSiteContentTs(latestSiteDataRef.current);
+    return generateSiteContentTs(sanitizeForRemotePersistence(latestSiteDataRef.current));
   }, []);
 
   const exportJsonCode = useCallback(() => {
-    return JSON.stringify(latestSiteDataRef.current, null, 2);
+    return JSON.stringify(sanitizeForRemotePersistence(latestSiteDataRef.current), null, 2);
   }, []);
 
   const importJsonCode = useCallback(
@@ -645,12 +1024,34 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [pushState]
   );
 
+  // Publish Live: Supabase Postgres + immutable snapshot in site_content_versions (or local server codebase write)
   const publishToCodebase = useCallback(async () => {
-    const current = latestSiteDataRef.current;
-    const tsCode = generateSiteContentTs(current);
-    try {
-      await saveToServer(current);
+    const cleanSnapshot = sanitizeForRemotePersistence(latestSiteDataRef.current);
+    const saveResult = await saveToServer(cleanSnapshot);
 
+    if (storageBackend === 'supabase') {
+      if (!saveResult.success) {
+        return saveResult;
+      }
+
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        await supabase.from('site_content_versions').insert({
+          content_id: SUPABASE_SITE_ROW_ID,
+          data: cleanSnapshot,
+          created_by: sessionData.session?.user?.email || adminEmail || 'admin',
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Published Live to Supabase across all devices & deployments',
+      };
+    }
+
+    const tsCode = generateSiteContentTs(cleanSnapshot);
+    try {
       const res = await fetch('/api/save-content', {
         method: 'POST',
         headers: {
@@ -670,62 +1071,69 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       return {
         success: false,
-        message: 'Authorization required or codebase write failed.',
+        message: saveResult.message || 'Authorization required or codebase write failed.',
       };
     } catch {
       return {
         success: false,
-        message: 'Direct API writing not reachable in static mode.',
+        message: 'Connect Supabase environment variables to publish live on static hosting.',
       };
     }
-  }, [saveToServer, getCmsAuthHeaders]);
+  }, [storageBackend, adminEmail, saveToServer, getCmsAuthHeaders]);
 
-  const openEditor = useCallback((tab?: EditorTab, projectId?: string | null) => {
-    setIsAuthorized(true);
-    setIsEditorOpen(true);
-    setIsPasscodeModalOpen(false);
-    if (tab) setActiveTab(tab);
-    if (projectId !== undefined) setEditingProjectId(projectId);
-  }, []);
+  const openEditor = useCallback(
+    (tab?: EditorTab, projectId?: string | null) => {
+      if (!isAuthorized) {
+        setIsPasscodeModalOpen(true);
+        return;
+      }
+      setIsEditorOpen(true);
+      setIsPasscodeModalOpen(false);
+      if (tab) setActiveTab(tab);
+      if (projectId !== undefined) setEditingProjectId(projectId);
+    },
+    [isAuthorized]
+  );
 
   const closeEditor = useCallback(() => {
     setIsEditorOpen(false);
   }, []);
 
   const toggleEditor = useCallback(() => {
+    if (!isAuthorized) {
+      setIsPasscodeModalOpen(true);
+      return;
+    }
     setIsEditorOpen((prev) => !prev);
-  }, []);
+  }, [isAuthorized]);
 
   const toggleClickToEdit = useCallback(() => {
     setIsClickToEditActive((prev) => !prev);
   }, []);
 
-  const saveProjectVideoBlob = useCallback(
-    async (projectId: string, blob: Blob): Promise<string> => {
-      await saveVideoBlob(`video_blob_${projectId}`, blob);
-      const existingUrl = createdBlobUrlsRef.current.get(projectId);
-      if (existingUrl) {
-        try {
-          URL.revokeObjectURL(existingUrl);
-        } catch {
-          // ignore
-        }
+  // Offline IndexedDB blob backup only (returns preview ObjectURL; never writes over cloud URLs)
+  const saveProjectVideoBlob = useCallback(async (projectId: string, blob: Blob): Promise<string> => {
+    await saveVideoBlob(`video_blob_${projectId}`, blob);
+    const existingUrl = createdBlobUrlsRef.current.get(projectId);
+    if (existingUrl) {
+      try {
+        URL.revokeObjectURL(existingUrl);
+      } catch {
+        // ignore
       }
-      const liveUrl = URL.createObjectURL(blob);
-      createdBlobUrlsRef.current.set(projectId, liveUrl);
-      updateSingleCaseStudy(projectId, {
-        videoUrl: liveUrl,
-        hasVideo: true,
-      });
-      return liveUrl;
-    },
-    [updateSingleCaseStudy]
-  );
+    }
+    const liveUrl = URL.createObjectURL(blob);
+    createdBlobUrlsRef.current.set(projectId, liveUrl);
+    return liveUrl;
+  }, []);
 
   return (
     <ContentContext.Provider
       value={{
         siteData,
+        storageBackend,
+        serverAuthMode,
+        adminEmail,
         isAuthorized,
         isEditorOpen,
         isPasscodeModalOpen,
@@ -737,6 +1145,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         canUndo: undoStack.length > 0,
         canRedo: redoStack.length > 0,
         saveStatus,
+        saveErrorMessage,
         lastSavedAt,
         openEditor,
         closeEditor,
@@ -747,7 +1156,9 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setActiveTab,
         setPreviewDevice,
         setEditingProjectId,
-        authorize,
+        signInWithSupabase,
+        authorizePasscode,
+        setupAdminPasscode,
         deauthorize,
         getCmsAuthHeaders,
         updateConfig,

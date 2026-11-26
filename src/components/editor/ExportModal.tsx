@@ -20,6 +20,7 @@ interface ExportModalProps {
 
 export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
   const {
+    storageBackend,
     exportTypeScriptCode,
     exportJsonCode,
     importJsonCode,
@@ -168,18 +169,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
         </div>
 
         <div className="mt-5 space-y-5 max-h-[75vh] overflow-y-auto pr-1">
-          {/* Primary Action: Direct Codebase Publish */}
+          {/* Primary Action: Cloud Publish */}
           <div className="rounded-xl border border-[#2563EB]/30 bg-gradient-to-r from-[#2563EB]/10 to-transparent p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#38BDF8] uppercase tracking-wider mb-1">
-                  <Sparkles className="size-3" /> Recommended (1-Click)
+                  <Sparkles className="size-3" />{' '}
+                  {storageBackend === 'supabase'
+                    ? 'Supabase Cloud Connected'
+                    : 'Local Server Mode (Add Supabase keys for Cloudflare)'}
                 </span>
                 <h4 className="font-display font-bold text-base text-white">
-                  Publish to Codebase File
+                  {storageBackend === 'supabase'
+                    ? 'Publish Live Snapshot to Supabase'
+                    : 'Publish to Codebase File'}
                 </h4>
                 <p className="text-xs text-white/70 mt-1 leading-relaxed">
-                  Writes all active edits directly to <code className="text-white bg-black/50 px-1.5 py-0.5 rounded font-mono">src/data/siteContent.ts</code>. Your changes will be preserved permanently in the project repository.
+                  {storageBackend === 'supabase'
+                    ? 'Persists your entire site layout, copy, and Supabase Storage CDN URLs to Postgres and records a version history snapshot.'
+                    : 'Writes all active edits directly to src/data/siteContent.ts on local Node dev. Add VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY for Cloudflare Pages.'}
                 </p>
               </div>
               <button
@@ -193,7 +201,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
                 ) : (
                   <Server className="size-4" />
                 )}
-                <span>{isPublishing ? 'Publishing...' : 'Save to Codebase'}</span>
+                <span>
+                  {isPublishing
+                    ? 'Publishing...'
+                    : storageBackend === 'supabase'
+                    ? 'Publish to Supabase'
+                    : 'Save to Codebase'}
+                </span>
               </button>
             </div>
 

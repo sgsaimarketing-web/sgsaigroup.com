@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Sliders, Grid, RefreshCw, Check, Sparkles, Film } from 'lucide-react';
+import { Camera, Sliders, Grid, RefreshCw, Check, Film, AlertCircle } from 'lucide-react';
 import { captureVideoFrame, extractFrameGrid, ExtractedFrame } from '../../utils/videoFrameGrabber.ts';
+import { uploadDataUrlAsset } from '../../lib/mediaUpload.ts';
+import { useSiteContent } from '../../context/ContentContext.tsx';
 
 interface VideoThumbnailPickerProps {
   videoUrl: string;
@@ -13,6 +15,7 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
   currentPosterUrl,
   onSelectPoster,
 }) => {
+  const { getCmsAuthHeaders } = useSiteContent();
   const [activeTab, setActiveTab] = useState<'scrubber' | 'grid'>('scrubber');
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(10);
@@ -20,6 +23,7 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [gridFrames, setGridFrames] = useState<ExtractedFrame[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -44,6 +48,7 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
     if (!videoUrl) return;
     setIsExtracting(true);
     setSuccessMessage(null);
+    setErrorMessage(null);
     try {
       const frames = await extractFrameGrid(videoUrl, 5, 270, 480);
       setGridFrames(frames);
@@ -63,29 +68,14 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
     }
   };
 
-  // Helper to persist captured 9:16 frame as a permanent public server asset
-  const uploadPosterToServer = async (dataUrl: string, label: string): Promise<string> => {
-    try {
-      const controller = new AbortController();
-      const abortTimeout = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch('/api/upload-media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: `poster-${Date.now()}-${label.replace(/[^a-zA-Z0-9]/g, '_')}.webp`,
-          dataUrl,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(abortTimeout);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) return data.url;
-      }
-    } catch (err) {
-      console.warn('Poster server upload fallback to dataUrl:', err);
-    }
-    return dataUrl;
+  // Persist captured 9:16 frame to Supabase Storage CDN (or authenticated server fallback)
+  const persistCapturedPoster = async (dataUrl: string, label: string): Promise<string> => {
+    const uploaded = await uploadDataUrlAsset(dataUrl, {
+      fileName: `poster-${label.replace(/[^a-zA-Z0-9_-]/g, '_')}.webp`,
+      folder: 'posters',
+      authHeaders: getCmsAuthHeaders(),
+    });
+    return uploaded.url;
   };
 
   // Capture current scrubbed frame
@@ -93,24 +83,30 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
     if (!videoRef.current) return;
     setIsCapturing(true);
     setSuccessMessage(null);
+    setErrorMessage(null);
     try {
       const frameDataUrl = await captureVideoFrame(videoRef.current, currentTime, 540, 960);
-      const publicUrl = await uploadPosterToServer(frameDataUrl, `scrub-${Math.round(currentTime)}s`);
+      const publicUrl = await persistCapturedPoster(frameDataUrl, `scrub-${Math.round(currentTime)}s`);
       onSelectPoster(publicUrl);
-      setSuccessMessage(`Captured & saved frame at ${formatTime(currentTime)} as 9:16 public poster!`);
+      setSuccessMessage(`Captured & saved frame at ${formatTime(currentTime)} as 9:16 poster!`);
       setTimeout(() => setSuccessMessage(null), 3500);
     } catch (err: any) {
-      console.warn('Capture failed:', err);
+      setErrorMessage(err?.message || 'Could not capture & save frame.');
     } finally {
       setIsCapturing(false);
     }
   };
 
   const handleSelectGridFrame = async (frame: ExtractedFrame) => {
-    const publicUrl = await uploadPosterToServer(frame.dataUrl, `grid-${frame.label}`);
-    onSelectPoster(publicUrl);
-    setSuccessMessage(`Selected & saved frame at ${frame.label} as 9:16 public poster!`);
-    setTimeout(() => setSuccessMessage(null), 3500);
+    setErrorMessage(null);
+    try {
+      const publicUrl = await persistCapturedPoster(frame.dataUrl, `grid-${frame.label}`);
+      onSelectPoster(publicUrl);
+      setSuccessMessage(`Selected & saved frame at ${frame.label} as 9:16 poster!`);
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to upload selected poster frame.');
+    }
   };
 
   const formatTime = (timeInSecs: number) => {
@@ -163,6 +159,13 @@ export const VideoThumbnailPicker: React.FC<VideoThumbnailPickerProps> = ({
         <div className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 p-2 text-xs text-emerald-300 animate-in fade-in">
           <Check className="size-3.5 shrink-0" />
           <span>{successMessage}</span>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="flex items-center gap-1.5 rounded-lg bg-red-500/15 border border-red-500/30 p-2 text-xs text-red-300 animate-in fade-in">
+          <AlertCircle className="size-3.5 shrink-0 text-red-400" />
+          <span>{errorMessage}</span>
         </div>
       )}
 

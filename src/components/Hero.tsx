@@ -214,6 +214,13 @@ export const Hero: React.FC<HeroProps> = ({
       ? 'text-[3.25rem] leading-[0.94] tracking-[-0.035em]'
       : 'text-6xl xl:text-[5rem] leading-[0.92] tracking-[-0.035em]';
 
+  const motionTimingClass =
+    hero.animationSpeed === 'subtle'
+      ? 'transition-all duration-1000 ease-out'
+      : hero.animationSpeed === 'dynamic'
+      ? 'transition-all duration-200 ease-out'
+      : 'transition-all duration-500 ease-out';
+
   const renderTeaserMedia = () => {
     if (isVideo) {
       return (
@@ -367,7 +374,7 @@ export const Hero: React.FC<HeroProps> = ({
             }`}
           >
             {/* Index 01 & Eyebrow */}
-            <div className="animate-rise flex items-center gap-2.5 sm:gap-3">
+            <div className={`animate-rise flex items-center gap-2.5 sm:gap-3 ${motionTimingClass}`}>
               <span className="font-display text-xs font-bold text-[#2563EB]">01</span>
               <span className="h-3 w-[2px] bg-[#2563EB]" aria-hidden="true" />
               <p
@@ -383,7 +390,7 @@ export const Hero: React.FC<HeroProps> = ({
 
             {/* Master Headline with Device-Tailored Scale */}
             <h1
-              className={`mt-4 sm:mt-6 font-display font-black uppercase ${titleClass} text-white [text-wrap:balance]`}
+              className={`mt-4 sm:mt-6 font-display font-black uppercase ${titleClass} ${motionTimingClass} text-white [text-wrap:balance]`}
             >
               {(hero.headlineLines && hero.headlineLines.length > 0
                 ? hero.headlineLines
@@ -391,7 +398,7 @@ export const Hero: React.FC<HeroProps> = ({
               ).map((line, idx, arr) => (
                 <span
                   key={`${idx}-${line}`}
-                  className={`block hero-line ${
+                  className={`block hero-line ${motionTimingClass} ${
                     idx === arr.length - 1
                       ? 'text-[#38BDF8]'
                       : idx === 1
@@ -405,7 +412,7 @@ export const Hero: React.FC<HeroProps> = ({
             </h1>
 
             {/* Subtitle Paragraph & Primary CTAs */}
-            <div className="hero-support animate-rise mt-4 sm:mt-6 max-w-xl">
+            <div className={`hero-support animate-rise mt-4 sm:mt-6 max-w-xl ${motionTimingClass}`}>
               <p
                 className={`${
                   device === 'mobile'

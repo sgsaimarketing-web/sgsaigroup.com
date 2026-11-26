@@ -490,13 +490,13 @@ export const SelectedWorkEditor: React.FC = () => {
                         type="button"
                         onClick={() =>
                           updateSingleCaseStudy(activeProject.id, {
-                            videoUrl: '/assets/uploads/1794208984335-Nelson_Profile_Video__1___1_.mp4',
+                            videoUrl: '/assets/work/alzara-curry-reel.mp4',
                             hasVideo: true,
                           })
                         }
                         className="px-2 py-1 rounded bg-[#2563EB] hover:bg-[#1D4ED8] text-[10px] text-white font-medium transition cursor-pointer"
                       >
-                        Nelson Reel
+                        Alzara Reel
                       </button>
                       <button
                         type="button"
@@ -523,15 +523,8 @@ export const SelectedWorkEditor: React.FC = () => {
                     posterUrl={activeProject.posterUrl || activeProject.coverImage}
                     allowVideo={true}
                     onVideoFileSelect={async (file) => {
-                      try {
-                        const liveUrl = await saveProjectVideoBlob(activeProject.id, file);
-                        updateSingleCaseStudy(activeProject.id, {
-                          videoUrl: liveUrl,
-                          hasVideo: true,
-                        });
-                      } catch (e) {
-                        console.error('Failed to save video blob to IndexedDB:', e);
-                      }
+                      // Store offline IndexedDB backup without overwriting permanent cloud/server URL
+                      await saveProjectVideoBlob(activeProject.id, file).catch(() => {});
                     }}
                     onChange={(patch) => {
                       updateSingleCaseStudy(activeProject.id, {

@@ -6,26 +6,33 @@ import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
 export const Footer: React.FC = () => {
   const {
     siteData,
+    storageBackend,
+    serverAuthMode,
     isAuthorized,
     isPasscodeModalOpen,
     openPasscodeModal,
     closePasscodeModal,
     toggleEditor,
     openEditor,
-    authorize,
+    signInWithSupabase,
+    authorizePasscode,
+    setupAdminPasscode,
   } = useSiteContent();
   const device = useEffectiveDevice();
   const config = siteData.config;
   const navLinks = siteData.navLinks;
   const contact = siteData.contact;
 
+  const [email, setEmail] = useState('sgsaimarketing@gmail.com');
   const [passcode, setPasscode] = useState('');
-  const [errorMsg, setErrorMsg] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isPasscodeModalOpen) {
       setPasscode('');
-      setErrorMsg(false);
+      setErrorMsg(null);
+      setIsSubmitting(false);
       return;
     }
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -45,15 +52,29 @@ export const Footer: React.FC = () => {
     }
   };
 
-  const handlePasscodeSubmit = (e: React.FormEvent) => {
+  const handlePasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authorize(passcode)) {
-      closePasscodeModal();
-      openEditor('hero');
-      setPasscode('');
-      setErrorMsg(false);
-    } else {
-      setErrorMsg(true);
+    setErrorMsg(null);
+    setIsSubmitting(true);
+
+    try {
+      const result =
+        storageBackend === 'supabase'
+          ? await signInWithSupabase(email, passcode)
+          : serverAuthMode === 'setup_required'
+          ? await setupAdminPasscode(passcode)
+          : await authorizePasscode(passcode);
+
+      if (result.success) {
+        closePasscodeModal();
+        openEditor('hero');
+        setPasscode('');
+        setErrorMsg(null);
+      } else {
+        setErrorMsg(result.error || 'Authentication failed. Please try again.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -177,7 +198,7 @@ export const Footer: React.FC = () => {
         </div>
       </div>
 
-      {/* Unified Accessible Passcode Modal (triggered from Footer lock or Ctrl+Shift+E) */}
+      {/* Unified Accessible Admin Sign-In Modal (Supabase Auth or Local Server Setup/Login) */}
       {isPasscodeModalOpen && (
         <div
           role="dialog"
@@ -190,30 +211,74 @@ export const Footer: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-xl border border-white/10 bg-[#161B22] p-6 text-white shadow-2xl"
           >
-            <h3 id="cms-passcode-title" className="font-display font-bold text-base mb-1">
-              SGS Studio Access
-            </h3>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <h3 id="cms-passcode-title" className="font-display font-bold text-base">
+                SGS Studio Access
+              </h3>
+              <span className="rounded px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-[#2563EB]/20 text-[#38BDF8] border border-[#2563EB]/30">
+                {storageBackend === 'supabase' ? 'Supabase Auth' : 'Local Server'}
+              </span>
+            </div>
+
             <p className="text-xs text-[#94A3B8] mb-4">
-              Enter authorized administrator passcode to open the visual CMS editor.
+              {storageBackend === 'supabase'
+                ? 'Sign in with your authorized Supabase Admin email & password to edit and publish live.'
+                : serverAuthMode === 'setup_required'
+                ? 'First-run studio setup: choose an administrator passcode (minimum 6 characters).'
+                : 'Enter your administrator passcode to open the visual CMS editor.'}
             </p>
 
             <form onSubmit={handlePasscodeSubmit} className="space-y-3">
-              <input
-                type="password"
-                autoFocus
-                value={passcode}
-                onChange={(e) => {
-                  setPasscode(e.target.value);
-                  if (errorMsg) setErrorMsg(false);
-                }}
-                placeholder="Enter studio passcode"
-                aria-label="Administrator passcode"
-                className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2.5 min-h-[44px] text-base sm:text-sm text-white focus:border-[#2563EB] focus:outline-none"
-              />
+              {storageBackend === 'supabase' && (
+                <div>
+                  <label htmlFor="cms-admin-email" className="sr-only">
+                    Admin Email
+                  </label>
+                  <input
+                    id="cms-admin-email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
+                    placeholder="Admin email"
+                    aria-label="Administrator email"
+                    className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2.5 min-h-[44px] text-base sm:text-sm text-white focus:border-[#2563EB] focus:outline-none"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="cms-admin-password" className="sr-only">
+                  {storageBackend === 'supabase' ? 'Password' : 'Passcode'}
+                </label>
+                <input
+                  id="cms-admin-password"
+                  type="password"
+                  required
+                  autoFocus={storageBackend !== 'supabase'}
+                  value={passcode}
+                  onChange={(e) => {
+                    setPasscode(e.target.value);
+                    if (errorMsg) setErrorMsg(null);
+                  }}
+                  placeholder={
+                    storageBackend === 'supabase'
+                      ? 'Enter Supabase admin password'
+                      : serverAuthMode === 'setup_required'
+                      ? 'Create studio passcode (6+ chars)'
+                      : 'Enter studio passcode'
+                  }
+                  aria-label="Administrator password or passcode"
+                  className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-2.5 min-h-[44px] text-base sm:text-sm text-white focus:border-[#2563EB] focus:outline-none"
+                />
+              </div>
 
               {errorMsg && (
-                <p role="alert" className="text-xs text-red-400">
-                  Invalid passcode. Please try again.
+                <p role="alert" className="text-xs text-red-400 leading-relaxed">
+                  {errorMsg}
                 </p>
               )}
 
@@ -227,9 +292,16 @@ export const Footer: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-4 py-2 min-h-[40px] text-xs font-semibold text-white cursor-pointer"
+                  disabled={isSubmitting}
+                  className="rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] px-4 py-2 min-h-[40px] text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
                 >
-                  Unlock CMS
+                  {isSubmitting
+                    ? 'Verifying...'
+                    : storageBackend === 'supabase'
+                    ? 'Sign In & Unlock'
+                    : serverAuthMode === 'setup_required'
+                    ? 'Save & Unlock'
+                    : 'Unlock CMS'}
                 </button>
               </div>
             </form>

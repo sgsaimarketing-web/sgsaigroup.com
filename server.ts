@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { generateSiteContentTs } from './src/data/contentSerializer.ts';
@@ -18,7 +19,10 @@ import {
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
-const CMS_PASSCODE = process.env.CMS_PASSCODE || 'sgs2026';
+const ENV_CMS_PASSCODE = (process.env.CMS_PASSCODE || '').trim();
+const SESSION_SECRET =
+  (process.env.CMS_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB limit
 const ALLOWED_UPLOAD_EXTS = new Set([
   '.mp4',
@@ -34,6 +38,7 @@ const ALLOWED_UPLOAD_EXTS = new Set([
 // Ensure required directories exist
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'site-content.json');
+const ADMIN_CREDENTIAL_FILE = path.join(DATA_DIR, 'cms-admin.json');
 const UPLOADS_DIR = path.resolve(process.cwd(), 'public/assets/uploads');
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -47,18 +52,107 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 let contentVersion = Date.now().toString();
 const sseClients = new Set<Response>();
 
+interface StoredAdminCredential {
+  salt: string;
+  hash: string;
+  updatedAt: string;
+}
+
+function readStoredAdminCredential(): StoredAdminCredential | null {
+  try {
+    if (!fs.existsSync(ADMIN_CREDENTIAL_FILE)) return null;
+    const raw = JSON.parse(fs.readFileSync(ADMIN_CREDENTIAL_FILE, 'utf-8'));
+    if (typeof raw?.salt === 'string' && typeof raw?.hash === 'string') {
+      return raw as StoredAdminCredential;
+    }
+  } catch {
+    // ignore malformed credential file
+  }
+  return null;
+}
+
+function getServerAuthMode(): 'env' | 'claimed' | 'setup_required' {
+  if (ENV_CMS_PASSCODE.length > 0) return 'env';
+  if (readStoredAdminCredential()) return 'claimed';
+  return 'setup_required';
+}
+
+function hashPasscodeScrypt(passcode: string, salt?: string): { salt: string; hash: string } {
+  const actualSalt = salt || crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(passcode, actualSalt, 64).toString('hex');
+  return { salt: actualSalt, hash: derived };
+}
+
+function verifyPasscodeInput(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed) return false;
+
+  if (ENV_CMS_PASSCODE.length > 0) {
+    const a = crypto.createHash('sha256').update(trimmed).digest();
+    const b = crypto.createHash('sha256').update(ENV_CMS_PASSCODE).digest();
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  const stored = readStoredAdminCredential();
+  if (!stored) return false;
+
+  const derived = crypto.scryptSync(trimmed, stored.salt, 64);
+  const expected = Buffer.from(stored.hash, 'hex');
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+}
+
+function issueSessionToken(): string {
+  const payload = Buffer.from(
+    JSON.stringify({ role: 'admin', exp: Date.now() + SESSION_TTL_MS }),
+    'utf-8'
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifySessionToken(token: string): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [payload, sig] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', SESSION_SECRET)
+    .update(payload)
+    .digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expectedSig);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+    return parsed?.role === 'admin' && typeof parsed?.exp === 'number' && parsed.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
 function isAuthorizedCmsRequest(req: Request): boolean {
-  const headerToken = typeof req.headers['x-cms-auth'] === 'string' ? req.headers['x-cms-auth'].trim() : '';
-  const bodyToken = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
-  const token = headerToken || bodyToken;
-  return token === CMS_PASSCODE || token === 'sgs';
+  const authHeader =
+    typeof req.headers.authorization === 'string' ? req.headers.authorization.trim() : '';
+  if (authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.slice(7).trim();
+    if (verifySessionToken(bearerToken)) return true;
+  }
+
+  const headerToken =
+    typeof req.headers['x-cms-auth'] === 'string' ? req.headers['x-cms-auth'].trim() : '';
+  if (headerToken && (verifySessionToken(headerToken) || verifyPasscodeInput(headerToken))) {
+    return true;
+  }
+
+  return false;
 }
 
 function requireCmsAuth(req: Request, res: Response, next: NextFunction): void {
   if (!isAuthorizedCmsRequest(req)) {
     res.status(401).json({
       success: false,
-      error: 'Unauthorized: Valid CMS authentication header required.',
+      error: 'Unauthorized: Valid CMS admin session required.',
     });
     return;
   }
@@ -142,6 +236,81 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     return;
   }
   next(err);
+});
+
+// 0. Local Express Admin Auth Endpoints (used when Supabase is not configured)
+app.get('/api/auth/status', (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    mode: getServerAuthMode(),
+    authenticated: isAuthorizedCmsRequest(req),
+  });
+});
+
+app.post('/api/auth/setup', (req: Request, res: Response) => {
+  if (getServerAuthMode() !== 'setup_required') {
+    res.status(409).json({
+      success: false,
+      error: 'Admin passcode is already configured. Please sign in instead.',
+    });
+    return;
+  }
+
+  const passcode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
+  if (passcode.length < 6) {
+    res.status(400).json({
+      success: false,
+      error: 'Please choose an admin passcode with at least 6 characters.',
+    });
+    return;
+  }
+
+  try {
+    const { salt, hash } = hashPasscodeScrypt(passcode);
+    atomicWriteFileSync(
+      ADMIN_CREDENTIAL_FILE,
+      JSON.stringify({ salt, hash, updatedAt: new Date().toISOString() }, null, 2)
+    );
+    const token = issueSessionToken();
+    res.json({
+      success: true,
+      token,
+      mode: 'claimed',
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to store admin credentials.',
+    });
+  }
+});
+
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  const mode = getServerAuthMode();
+  if (mode === 'setup_required') {
+    res.status(400).json({
+      success: false,
+      mode,
+      error: 'No admin passcode configured yet. Complete initial setup first.',
+    });
+    return;
+  }
+
+  const passcode = typeof req.body?.passcode === 'string' ? req.body.passcode : '';
+  if (!verifyPasscodeInput(passcode)) {
+    res.status(401).json({
+      success: false,
+      error: 'Invalid administrator passcode.',
+    });
+    return;
+  }
+
+  const token = issueSessionToken();
+  res.json({
+    success: true,
+    token,
+    mode,
+  });
 });
 
 // 1. SSE Real-Time Stream Endpoint
@@ -266,7 +435,11 @@ app.post('/api/upload-media', requireCmsAuth, (req: Request, res: Response) => {
       return;
     }
 
-    const targetPath = path.join(UPLOADS_DIR, sanitized);
+    const targetPath = path.resolve(UPLOADS_DIR, sanitized);
+    if (!targetPath.startsWith(UPLOADS_DIR + path.sep)) {
+      res.status(400).json({ success: false, error: 'Invalid upload file path.' });
+      return;
+    }
     const fileStream = fs.createWriteStream(targetPath);
     let receivedBytes = 0;
     let aborted = false;
@@ -333,7 +506,11 @@ app.post('/api/upload-media', requireCmsAuth, (req: Request, res: Response) => {
         return;
       }
 
-      const targetPath = path.join(UPLOADS_DIR, sanitized);
+      const targetPath = path.resolve(UPLOADS_DIR, sanitized);
+      if (!targetPath.startsWith(UPLOADS_DIR + path.sep)) {
+        res.status(400).json({ success: false, error: 'Invalid upload file path.' });
+        return;
+      }
       let fileBuffer: Buffer;
       if (typeof data.dataUrl === 'string' && data.dataUrl.includes(';base64,')) {
         const base64Data = data.dataUrl.split(';base64,').pop() || '';
@@ -366,9 +543,13 @@ app.post('/api/upload-media', requireCmsAuth, (req: Request, res: Response) => {
 // 6. Bounds-Checked HTTP Range Video Streaming Middleware for /assets/uploads
 app.use('/assets/uploads', (req: Request, res: Response, next: NextFunction) => {
   const fileName = path.basename((req.url || '').split('?')[0]);
-  const filePath = path.join(UPLOADS_DIR, fileName);
+  const filePath = path.resolve(UPLOADS_DIR, fileName);
 
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+  if (
+    filePath.startsWith(UPLOADS_DIR + path.sep) &&
+    fs.existsSync(filePath) &&
+    fs.statSync(filePath).isFile()
+  ) {
     const ext = path.extname(filePath).toLowerCase();
     const mimeMap: Record<string, string> = {
       '.mp4': 'video/mp4',
