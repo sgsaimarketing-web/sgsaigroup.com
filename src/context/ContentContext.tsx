@@ -37,6 +37,7 @@ import {
 
 export const CODEBASE_CONTENT_VERSION = '2026-11-26-v7-supabase';
 const DRAFT_STORAGE_KEY = 'sgs_site_content_draft_v5';
+const DRAFT_DIRTY_FLAG_KEY = 'sgs_site_content_dirty_v1';
 
 export const DEFAULT_SITE_DATA: SiteData = {
   config: SITE_CONFIG,
@@ -49,6 +50,8 @@ export const DEFAULT_SITE_DATA: SiteData = {
   caseStudies: CASE_STUDIES,
   contact: CONTACT_CONTENT,
 };
+
+const DEFAULT_SITE_DATA_JSON = JSON.stringify(DEFAULT_SITE_DATA);
 
 function isEphemeralBlobUrl(url?: string): boolean {
   return typeof url === 'string' && url.startsWith('blob:');
@@ -232,6 +235,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [serverAuthMode, setServerAuthMode] = useState<ServerAuthMode>('unknown');
 
   const [siteData, setSiteDataState] = useState<SiteData>(DEFAULT_SITE_DATA);
+  const [publishedBaselineJson, setPublishedBaselineJson] = useState<string>(DEFAULT_SITE_DATA_JSON);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -258,6 +262,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Held strictly in JS memory — never persisted to localStorage
   const cmsSessionTokenRef = useRef<string | null>(null);
+  const hasAuthoritativeRemoteRef = useRef<boolean>(false);
   const lastLocalEditTimestampRef = useRef<number>(0);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createdBlobUrlsRef = useRef<Map<string, string>>(new Map());
@@ -296,11 +301,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const isDraft = useMemo(() => {
     try {
-      return JSON.stringify(siteData) !== JSON.stringify(DEFAULT_SITE_DATA);
+      return JSON.stringify(siteData) !== publishedBaselineJson;
     } catch {
       return false;
     }
-  }, [siteData]);
+  }, [siteData, publishedBaselineJson]);
 
   // Verify whether current Supabase user is in public.cms_admins
   const verifySupabaseAdminUser = useCallback(
@@ -460,7 +465,8 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { ...candidate, caseStudies: updatedStudies };
   }, []);
 
-  // 1. Authoritative Initial Hydration (Supabase Postgres -> Local Express -> IndexedDB fallback)
+  // 1. Authoritative Initial Hydration (Supabase Postgres -> Local Express -> Built-in Defaults)
+  // Public visitors never hydrate unpublished local IndexedDB/localStorage drafts.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let isMounted = true;
@@ -486,15 +492,15 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
               }
             } else if (row?.data && isMounted) {
               const hydrated = hydrateSiteData(row.data as Partial<SiteData>);
+              hasAuthoritativeRemoteRef.current = true;
               setSiteDataState(hydrated);
+              setPublishedBaselineJson(JSON.stringify(hydrated));
               setSaveStatus('saved');
               setLastSavedAt(row.updated_at ? new Date(row.updated_at) : new Date());
-              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
-              saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
               return;
             }
           } catch (err) {
-            console.warn('Supabase content hydration unavailable, checking local cache:', err);
+            console.warn('Supabase content hydration unavailable:', err);
           }
         }
       } else {
@@ -505,30 +511,23 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const json = await res.json();
             if (json && json.data && isMounted) {
               const hydrated = hydrateSiteData(json.data);
+              hasAuthoritativeRemoteRef.current = true;
               setSiteDataState(hydrated);
+              setPublishedBaselineJson(JSON.stringify(hydrated));
               setSaveStatus('saved');
               setLastSavedAt(new Date());
-              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(hydrated));
-              saveToIndexedDB(DRAFT_STORAGE_KEY, hydrated);
               return;
             }
           }
         } catch (err) {
-          console.warn('Initial server fetch not available, checking local cache:', err);
+          console.warn('Initial server fetch not available:', err);
         }
       }
 
-      // Path C: Offline IndexedDB draft recovery (with binary video blob rehydration)
-      try {
-        const idbDraft = await loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY);
-        if (idbDraft && idbDraft.caseStudies && isMounted) {
-          const recovered = await rehydrateOfflineVideoBlobs(idbDraft);
-          if (isMounted) {
-            setSiteDataState(hydrateSiteData(recovered, getActiveBlobUrlSet()));
-          }
-        }
-      } catch (e) {
-        console.warn('Local draft load error:', e);
+      if (isMounted) {
+        hasAuthoritativeRemoteRef.current = false;
+        setSiteDataState(DEFAULT_SITE_DATA);
+        setPublishedBaselineJson(DEFAULT_SITE_DATA_JSON);
       }
     }
 
@@ -537,7 +536,44 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => {
       isMounted = false;
     };
-  }, [storageBackend, rehydrateOfflineVideoBlobs, getActiveBlobUrlSet]);
+  }, [storageBackend]);
+
+  // 1b. Authorized Admin Offline Draft Recovery (only when authenticated admin has unsaved/offline edits)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isAuthorized) return;
+    let isMounted = true;
+
+    async function recoverAuthorizedAdminDraft() {
+      try {
+        let hasDirtyLocalDraft = false;
+        try {
+          hasDirtyLocalDraft = localStorage.getItem(DRAFT_DIRTY_FLAG_KEY) === 'true';
+        } catch {
+          hasDirtyLocalDraft = false;
+        }
+
+        if (!hasDirtyLocalDraft && hasAuthoritativeRemoteRef.current) {
+          return;
+        }
+
+        const idbDraft = await loadFromIndexedDB<SiteData>(DRAFT_STORAGE_KEY);
+        if (idbDraft && idbDraft.caseStudies && isMounted) {
+          const recovered = await rehydrateOfflineVideoBlobs(idbDraft);
+          if (isMounted) {
+            setSiteDataState(hydrateSiteData(recovered, getActiveBlobUrlSet()));
+          }
+        }
+      } catch (e) {
+        console.warn('Authorized admin draft recovery error:', e);
+      }
+    }
+
+    void recoverAuthorizedAdminDraft();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthorized, rehydrateOfflineVideoBlobs, getActiveBlobUrlSet]);
 
   // 2. Real-Time Cross-Device Sync (Supabase Realtime or Local Server SSE)
   useEffect(() => {
@@ -563,11 +599,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const incomingTs = nextRow.updated_at ? Date.parse(nextRow.updated_at) : Date.now();
             if (incomingTs > lastLocalEditTimestampRef.current + 1500) {
               const synced = hydrateSiteData(nextRow.data);
+              hasAuthoritativeRemoteRef.current = true;
               setSiteDataState(synced);
+              setPublishedBaselineJson(JSON.stringify(synced));
               setSaveStatus('saved');
               setLastSavedAt(new Date(incomingTs));
-              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(synced));
-              saveToIndexedDB(DRAFT_STORAGE_KEY, synced);
             }
           }
         )
@@ -592,10 +628,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             const incomingTimestamp = parsed.timestamp || 0;
             if (incomingTimestamp > lastLocalEditTimestampRef.current) {
               const synced = hydrateSiteData(parsed.data);
+              hasAuthoritativeRemoteRef.current = true;
               setSiteDataState(synced);
+              setPublishedBaselineJson(JSON.stringify(synced));
               setSaveStatus('saved');
               setLastSavedAt(new Date(incomingTimestamp));
-              safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(synced));
             }
           }
         } catch (e) {
@@ -627,6 +664,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!supabase) {
           setSaveStatus('error');
           setSaveErrorMessage('Supabase client not configured.');
+          safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
           return { success: false, message: 'Supabase client not configured.' };
         }
 
@@ -634,6 +672,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!sessionData.session) {
           setSaveStatus('error');
           setSaveErrorMessage('Sign in as Supabase admin to save live.');
+          safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
           return { success: false, message: 'Sign in required before saving live.' };
         }
 
@@ -655,11 +694,19 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
               : error.message;
           setSaveStatus('error');
           setSaveErrorMessage(friendlyError);
+          safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
           return { success: false, message: `Supabase save failed: ${friendlyError}` };
         }
 
+        hasAuthoritativeRemoteRef.current = true;
+        setPublishedBaselineJson(JSON.stringify(cleanSnapshot));
         setSaveStatus('saved');
         setLastSavedAt(new Date(nowIso));
+        try {
+          localStorage.removeItem(DRAFT_DIRTY_FLAG_KEY);
+        } catch {
+          // ignore
+        }
         safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(cleanSnapshot));
         saveToIndexedDB(DRAFT_STORAGE_KEY, cleanSnapshot);
         return { success: true, message: 'Saved live to Supabase Postgres' };
@@ -677,8 +724,15 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
 
         if (res.ok) {
+          hasAuthoritativeRemoteRef.current = true;
+          setPublishedBaselineJson(JSON.stringify(cleanSnapshot));
           setSaveStatus('saved');
           setLastSavedAt(new Date());
+          try {
+            localStorage.removeItem(DRAFT_DIRTY_FLAG_KEY);
+          } catch {
+            // ignore
+          }
           safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(cleanSnapshot));
           saveToIndexedDB(DRAFT_STORAGE_KEY, cleanSnapshot);
           return { success: true, message: 'Saved to local Express server' };
@@ -692,11 +746,13 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             : `Save failed (HTTP ${res.status})`);
         setSaveStatus('error');
         setSaveErrorMessage(msg);
+        safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
         return { success: false, message: msg };
       } catch (err: any) {
         const msg = err?.message || 'Network error saving content';
         setSaveStatus('error');
         setSaveErrorMessage(msg);
+        safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
         return { success: false, message: msg };
       }
     },
@@ -708,6 +764,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       cancelPendingAutoSave();
       lastLocalEditTimestampRef.current = Date.now();
       setSiteDataState(snapshot);
+      safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
       saveToIndexedDB(DRAFT_STORAGE_KEY, snapshot);
       safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
       saveToServer(snapshot);
@@ -725,6 +782,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setSiteDataState(newState);
       setSaveStatus('saving');
 
+      safeSetLocalStorage(DRAFT_DIRTY_FLAG_KEY, 'true');
       saveToIndexedDB(DRAFT_STORAGE_KEY, newState);
       safeSetLocalStorage(DRAFT_STORAGE_KEY, JSON.stringify(newState));
 
@@ -878,8 +936,44 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const supabase = getSupabaseClient();
       if (supabase) {
         await supabase.auth.signOut().catch(() => {});
+        try {
+          const { data: row, error } = await supabase
+            .from('site_content')
+            .select('data')
+            .eq('id', SUPABASE_SITE_ROW_ID)
+            .maybeSingle();
+          if (!error && row?.data) {
+            const live = hydrateSiteData(row.data as Partial<SiteData>);
+            hasAuthoritativeRemoteRef.current = true;
+            setSiteDataState(live);
+            setPublishedBaselineJson(JSON.stringify(live));
+            return;
+          }
+        } catch {
+          // fallback below
+        }
+      }
+    } else {
+      try {
+        const res = await fetch('/api/content');
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.data) {
+            const live = hydrateSiteData(json.data);
+            hasAuthoritativeRemoteRef.current = true;
+            setSiteDataState(live);
+            setPublishedBaselineJson(JSON.stringify(live));
+            return;
+          }
+        }
+      } catch {
+        // fallback below
       }
     }
+
+    hasAuthoritativeRemoteRef.current = false;
+    setSiteDataState(DEFAULT_SITE_DATA);
+    setPublishedBaselineJson(DEFAULT_SITE_DATA_JSON);
   }, [storageBackend]);
 
   const openPasscodeModal = useCallback(() => {
@@ -1020,6 +1114,7 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
     removeFromIndexedDB(DRAFT_STORAGE_KEY);
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
+      localStorage.removeItem(DRAFT_DIRTY_FLAG_KEY);
     } catch {
       // ignore
     }
@@ -1030,6 +1125,13 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const syncWithCodebase = useCallback(async () => {
     cancelPendingAutoSave();
+    removeFromIndexedDB(DRAFT_STORAGE_KEY);
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      localStorage.removeItem(DRAFT_DIRTY_FLAG_KEY);
+    } catch {
+      // ignore
+    }
 
     if (storageBackend === 'supabase') {
       const supabase = getSupabaseClient();
@@ -1042,9 +1144,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
             .maybeSingle();
           if (!error && row?.data) {
             const fresh = hydrateSiteData(row.data as Partial<SiteData>);
+            hasAuthoritativeRemoteRef.current = true;
             setUndoStack([]);
             setRedoStack([]);
             setSiteDataState(fresh);
+            setPublishedBaselineJson(JSON.stringify(fresh));
             setSaveStatus('saved');
             return;
           }
@@ -1059,9 +1163,11 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const json = await res.json();
           if (json && json.data) {
             const fresh = hydrateSiteData(json.data);
+            hasAuthoritativeRemoteRef.current = true;
             setUndoStack([]);
             setRedoStack([]);
             setSiteDataState(fresh);
+            setPublishedBaselineJson(JSON.stringify(fresh));
             setSaveStatus('saved');
             return;
           }
@@ -1071,9 +1177,12 @@ export const ContentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    hasAuthoritativeRemoteRef.current = false;
     setUndoStack([]);
     setRedoStack([]);
     setSiteDataState(DEFAULT_SITE_DATA);
+    setPublishedBaselineJson(DEFAULT_SITE_DATA_JSON);
+    setSaveStatus('saved');
   }, [cancelPendingAutoSave, storageBackend]);
 
   const discardDraft = useCallback(() => {

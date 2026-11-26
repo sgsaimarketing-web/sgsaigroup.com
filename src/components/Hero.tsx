@@ -39,7 +39,7 @@ export const Hero: React.FC<HeroProps> = ({
   const isSimulatedDevice =
     isAuthorized && isEditorOpen && (previewDevice === 'tablet' || previewDevice === 'mobile');
 
-  const heroImage = hero.backgroundImage || config.heroImage || '/assets/nira-official.png';
+  const heroImage = hero.backgroundImage || config.heroImage || '/assets/nira-official.webp';
   const activeVideoSrc = hero.backgroundVideo;
   const isVideo = Boolean(activeVideoSrc) && !videoError;
 
@@ -232,7 +232,7 @@ export const Hero: React.FC<HeroProps> = ({
           loop
           muted={isMuted}
           playsInline
-          preload="auto"
+          preload="metadata"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onError={() => setVideoError(true)}

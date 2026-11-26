@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSiteContent } from '../context/ContentContext.tsx';
 import { Lock, Sliders } from 'lucide-react';
 import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
+import { useFocusTrap } from '../hooks/useFocusTrap.ts';
 
 export const Footer: React.FC = () => {
   const {
@@ -23,10 +24,13 @@ export const Footer: React.FC = () => {
   const navLinks = siteData.navLinks;
   const contact = siteData.contact;
 
-  const [email, setEmail] = useState('sgsaimarketing@gmail.com');
+  const [email, setEmail] = useState('');
   const [passcode, setPasscode] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const authModalRef = useRef<HTMLDivElement | null>(null);
+
+  useFocusTrap(isPasscodeModalOpen, authModalRef);
 
   useEffect(() => {
     if (!isPasscodeModalOpen) {
@@ -35,6 +39,7 @@ export const Footer: React.FC = () => {
       setIsSubmitting(false);
       return;
     }
+    authModalRef.current?.focus();
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         closePasscodeModal();
@@ -208,8 +213,10 @@ export const Footer: React.FC = () => {
           className="fixed inset-0 z-[250] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
         >
           <div
+            ref={authModalRef}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-xl border border-white/10 bg-[#161B22] p-6 text-white shadow-2xl"
+            className="w-full max-w-sm rounded-xl border border-white/10 bg-[#161B22] p-6 text-white shadow-2xl focus:outline-none"
           >
             <div className="flex items-center justify-between gap-2 mb-1">
               <h3 id="cms-passcode-title" className="font-display font-bold text-base">
@@ -240,6 +247,8 @@ export const Footer: React.FC = () => {
                     id="cms-admin-email"
                     type="email"
                     required
+                    autoFocus
+                    autoComplete="username"
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
@@ -261,6 +270,7 @@ export const Footer: React.FC = () => {
                   type="password"
                   required
                   autoFocus={storageBackend !== 'supabase'}
+                  autoComplete="current-password"
                   value={passcode}
                   onChange={(e) => {
                     setPasscode(e.target.value);

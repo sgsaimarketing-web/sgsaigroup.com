@@ -238,8 +238,12 @@ export const ContactEditor: React.FC = () => {
             <label className="block text-xs text-white/60 mb-1">Recipient Email</label>
             <input
               type="email"
-              value={config.email}
-              onChange={(e) => updateConfig({ email: e.target.value })}
+              value={contact.recipientEmail || config.email}
+              onChange={(e) => {
+                const nextEmail = e.target.value;
+                updateContact({ recipientEmail: nextEmail });
+                updateConfig({ email: nextEmail });
+              }}
               className="w-full rounded bg-black/50 border border-white/10 px-2.5 py-1 text-xs text-white focus:border-[#2563EB] focus:outline-none"
             />
           </div>

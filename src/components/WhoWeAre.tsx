@@ -137,7 +137,7 @@ export const WhoWeAre: React.FC = () => {
                         height={750}
                         onError={(e) => {
                           e.currentTarget.onerror = null;
-                          e.currentTarget.src = '/assets/nira-official.png';
+                          e.currentTarget.src = '/assets/nira-official.webp';
                         }}
                         className={`h-full w-full ${
                           resolvedMedia.fit === 'contain' ? 'object-contain bg-black' : 'object-cover'

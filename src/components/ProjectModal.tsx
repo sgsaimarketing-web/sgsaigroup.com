@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { CaseStudy, GalleryMediaItem } from '../data/siteContent.ts';
 import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
+import { useFocusTrap } from '../hooks/useFocusTrap.ts';
 import {
   getAspectRatioClass,
   getFocalClass,
@@ -45,6 +46,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [videoError, setVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useFocusTrap(Boolean(project), containerRef);
 
   // Prevent background scrolling when modal is open & autofocus modal
   useEffect(() => {

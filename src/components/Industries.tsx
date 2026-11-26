@@ -212,7 +212,7 @@ export const Industries: React.FC<IndustriesProps> = ({ onSelectCategory }) => {
                       height={300}
                       onError={(e) => {
                         e.currentTarget.onerror = null;
-                        e.currentTarget.src = '/assets/nira-connected-earth.png';
+                        e.currentTarget.src = '/assets/nira-connected-earth.webp';
                       }}
                       className={`h-full w-full ${
                         resolvedMedia.fit === 'contain' ? 'object-contain bg-black' : 'object-cover'

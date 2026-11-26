@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { useSiteContent, EditorTab } from '../../context/ContentContext.tsx';
 import {
   Monitor,
@@ -17,7 +17,10 @@ import {
   RefreshCw,
   LogOut,
 } from 'lucide-react';
-import { ExportModal } from './ExportModal.tsx';
+
+const ExportModal = lazy(() =>
+  import('./ExportModal.tsx').then((m) => ({ default: m.ExportModal }))
+);
 
 interface EditorToolbarProps {
   onToggleDrawer: () => void;
@@ -360,7 +363,11 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       </header>
 
       {/* Export / Publish Modal */}
-      <ExportModal isOpen={isExportOpen} onClose={() => setIsExportOpen(false)} />
+      {isExportOpen && (
+        <Suspense fallback={null}>
+          <ExportModal isOpen={isExportOpen} onClose={() => setIsExportOpen(false)} />
+        </Suspense>
+      )}
     </>
   );
 };

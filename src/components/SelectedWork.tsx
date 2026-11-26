@@ -320,8 +320,18 @@ export const SelectedWork: React.FC<SelectedWorkProps> = ({
               return (
                 <div
                   key={project.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open case study: ${project.title}`}
                   onClick={() => onSelectProject(project)}
-                  className={`group relative ${cardWidthClass} rounded-xl bg-[#0F1218] border border-black/[0.08] shadow-sm hover:shadow-2xl transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-end ${aspectClass}`}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelectProject(project);
+                    }
+                  }}
+                  className={`group relative ${cardWidthClass} rounded-xl bg-[#0F1218] border border-black/[0.08] shadow-sm hover:shadow-2xl transition-all duration-300 overflow-hidden cursor-pointer flex flex-col justify-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${aspectClass}`}
                 >
                   {/* Full-bleed Media / Video Poster / Cover */}
                   <div className="absolute inset-0 w-full h-full overflow-hidden bg-neutral-900">

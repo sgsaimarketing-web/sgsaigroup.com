@@ -8,7 +8,7 @@
  * With Private Visual Website Content & Design Editor (CMS)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Header } from './components/Header.tsx';
 import { Hero } from './components/Hero.tsx';
 import { WhoWeAre } from './components/WhoWeAre.tsx';
@@ -20,9 +20,14 @@ import { Footer } from './components/Footer.tsx';
 import { ProjectModal } from './components/ProjectModal.tsx';
 import { ShowreelModal } from './components/ShowreelModal.tsx';
 import { ContentProvider, useSiteContent } from './context/ContentContext.tsx';
-import { EditorToolbar } from './components/editor/EditorToolbar.tsx';
-import { EditorDrawer } from './components/editor/EditorDrawer.tsx';
 import { CaseStudy } from './data/siteContent.ts';
+
+const EditorToolbar = lazy(() =>
+  import('./components/editor/EditorToolbar.tsx').then((m) => ({ default: m.EditorToolbar }))
+);
+const EditorDrawer = lazy(() =>
+  import('./components/editor/EditorDrawer.tsx').then((m) => ({ default: m.EditorDrawer }))
+);
 
 function WebsiteContent() {
   const {
@@ -121,17 +126,15 @@ function WebsiteContent() {
         Skip to content
       </a>
 
-      {/* Private Visual CMS Top Command Toolbar */}
+      {/* Private Visual CMS Top Command Toolbar & Slide-out Drawer (Lazy-loaded for admins only) */}
       {isAuthorized && isEditorOpen && (
-        <EditorToolbar
-          onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
-          isDrawerOpen={isDrawerOpen}
-        />
-      )}
-
-      {/* Slide-out CMS Drawer */}
-      {isAuthorized && isEditorOpen && (
-        <EditorDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+        <Suspense fallback={null}>
+          <EditorToolbar
+            onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
+            isDrawerOpen={isDrawerOpen}
+          />
+          <EditorDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+        </Suspense>
       )}
 
       {/* Simulated Device Frame Container for Tablet & Mobile Previews */}
@@ -211,21 +214,21 @@ function WebsiteContent() {
         onStartProject={() => handleNavigateToContact()}
       />
 
-      {/* Floating Draft Indicator & 1-Click Sync to Live Codebase */}
-      {isDraft && !isEditorOpen && (
+      {/* Floating Draft Indicator & 1-Click Sync to Live Site (Authorized Admins Only) */}
+      {isAuthorized && isDraft && !isEditorOpen && (
         <aside
           aria-label="Draft mode notification"
           className="fixed bottom-5 right-5 z-[100] flex items-center gap-2.5 rounded-xl border border-amber-500/40 bg-[#0F1218]/95 px-3.5 py-2.5 text-xs text-white shadow-2xl backdrop-blur-md"
         >
           <div className="flex items-center gap-1.5 font-mono text-[11px] text-amber-300">
             <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="font-semibold">Local Draft Active</span>
+            <span className="font-semibold">Unpublished Draft Active</span>
           </div>
           <button
             type="button"
             onClick={syncWithCodebase}
             className="rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition cursor-pointer"
-            title="Purge local browser cache and reload official live site"
+            title="Discard local draft and reload official live site"
           >
             Sync to Live Site
           </button>

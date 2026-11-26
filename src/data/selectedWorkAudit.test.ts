@@ -11,8 +11,8 @@ import assert from 'node:assert';
 import {
   WORK_CATEGORIES,
   CASE_STUDIES,
-  CaseStudy,
-  GalleryMediaItem,
+  type CaseStudy,
+  type GalleryMediaItem,
 } from './siteContent.ts';
 
 describe('Section 05 — Selected Work QA Verification', () => {

@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Sparkles, ArrowRight, Video } from 'lucide-react';
 import { useEffectiveDevice } from '../hooks/useEffectiveDevice.ts';
+import { useSiteContent } from '../context/ContentContext.tsx';
+import { useFocusTrap } from '../hooks/useFocusTrap.ts';
+import { isImageAssetUrl, isVideoAssetUrl } from '../utils/responsiveMedia.ts';
 
 interface ShowreelModalProps {
   isOpen: boolean;
@@ -18,33 +21,6 @@ interface ShowreelTrack {
   poster: string;
 }
 
-const SHOWREEL_TRACKS: ShowreelTrack[] = [
-  {
-    id: 'nira-master',
-    label: '01 · NIRA AI World',
-    title: 'SGS AI Group · Agency Showreel Master',
-    subtitle: 'Creative Intelligence × AI Engineering across Malaysia & Singapore.',
-    src: '/assets/nira-loop.mp4',
-    poster: '/assets/work/cinema-camera.jpg',
-  },
-  {
-    id: 'alzara-reel',
-    label: '02 · Alzara FMCG',
-    title: 'Alzara Selera Terangkat Commercial Reel',
-    subtitle: 'Cinema-grade FMCG culinary production driving +38% consumer trial.',
-    src: '/assets/work/alzara-curry-reel.mp4',
-    poster: '/assets/work/alzara-curry-poster.webp',
-  },
-  {
-    id: 'mykaapie-reel',
-    label: '03 · My Kaapie',
-    title: 'My Kaapie Filter Coffee Sensory Launch',
-    subtitle: 'Artisanal beverage launch storytelling built for modern retail feeds.',
-    src: '/assets/work/mykaapie-coffee-reel.mp4',
-    poster: '/assets/work/mykaapie-coffee-poster.webp',
-  },
-];
-
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
   const mins = Math.floor(seconds / 60);
@@ -58,6 +34,7 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
   onExploreWork,
   onStartProject,
 }) => {
+  const { siteData } = useSiteContent();
   const device = useEffectiveDevice();
   const [activeTrackIndex, setActiveTrackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -72,7 +49,63 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
   const isMutedRef = useRef<boolean>(isMuted);
   isMutedRef.current = isMuted;
 
-  const activeTrack = SHOWREEL_TRACKS[activeTrackIndex] || SHOWREEL_TRACKS[0];
+  useFocusTrap(isOpen, containerRef);
+
+  const tracks = useMemo<ShowreelTrack[]>(() => {
+    const heroVideoSrc =
+      siteData.hero.backgroundVideo && isVideoAssetUrl(siteData.hero.backgroundVideo)
+        ? siteData.hero.backgroundVideo
+        : '/assets/nira-loop.mp4';
+    const heroPoster =
+      siteData.hero.backgroundImage && isImageAssetUrl(siteData.hero.backgroundImage)
+        ? siteData.hero.backgroundImage
+        : siteData.config.heroImage && isImageAssetUrl(siteData.config.heroImage)
+        ? siteData.config.heroImage
+        : '/assets/work/cinema-camera.jpg';
+
+    const masterTrack: ShowreelTrack = {
+      id: 'nira-master',
+      label: `01 · ${siteData.hero.niraBadge?.title || 'NIRA AI World'}`,
+      title: `${siteData.config.brandName} · Agency Showreel Master`,
+      subtitle: `${siteData.config.positioning} across ${siteData.config.regions}.`,
+      src: heroVideoSrc,
+      poster: heroPoster,
+    };
+
+    const seenSrcs = new Set<string>([heroVideoSrc]);
+    const caseStudyTracks: ShowreelTrack[] = [];
+
+    for (const cs of siteData.caseStudies) {
+      if (!cs.hasVideo || !cs.videoUrl || !isVideoAssetUrl(cs.videoUrl)) continue;
+      if (seenSrcs.has(cs.videoUrl)) continue;
+      seenSrcs.add(cs.videoUrl);
+
+      const numLabel = String(caseStudyTracks.length + 2).padStart(2, '0');
+      const shortSector = cs.sector ? cs.sector.split(' ')[0] : cs.title.split(' ')[0];
+      const poster =
+        cs.posterUrl && isImageAssetUrl(cs.posterUrl)
+          ? cs.posterUrl
+          : isImageAssetUrl(cs.coverImage)
+          ? cs.coverImage
+          : heroPoster;
+
+      caseStudyTracks.push({
+        id: cs.id,
+        label: `${numLabel} · ${shortSector}`,
+        title: cs.title,
+        subtitle: cs.subtitle,
+        src: cs.videoUrl,
+        poster,
+      });
+
+      if (caseStudyTracks.length >= 4) break;
+    }
+
+    return [masterTrack, ...caseStudyTracks];
+  }, [siteData.hero, siteData.config, siteData.caseStudies]);
+
+  const safeTrackIndex = activeTrackIndex < tracks.length ? activeTrackIndex : 0;
+  const activeTrack = tracks[safeTrackIndex] || tracks[0];
 
   // Lock body scroll while showreel is open
   useEffect(() => {
@@ -353,8 +386,8 @@ export const ShowreelModal: React.FC<ShowreelModalProps> = ({
         >
           {/* Reel Switcher */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
-            {SHOWREEL_TRACKS.map((track, idx) => {
-              const active = idx === activeTrackIndex;
+            {tracks.map((track, idx) => {
+              const active = idx === safeTrackIndex;
               return (
                 <button
                   key={track.id}

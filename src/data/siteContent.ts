@@ -210,8 +210,8 @@ export const SITE_CONFIG: SiteConfig = {
   "positioning": "Creative Intelligence × AI Engineering",
   "logoWhite": "/assets/sgs-logo-white.png",
   "logoDark": "/assets/sgs-logo.png",
-  "heroImage": "/assets/nira-official.png",
-  "earthImage": "/assets/nira-connected-earth.png",
+  "heroImage": "/assets/nira-official.webp",
+  "earthImage": "/assets/nira-connected-earth.webp",
   "email": "sgsaimarketing@gmail.com",
   "phoneTK": "+60 11-3944 0907",
   "phoneAppointments": "+60 17-270 8575",
@@ -263,7 +263,7 @@ export const HERO_CONTENT: HeroContent = {
     "subtitle": "PEOPLE. IDEAS. A SMARTER TOMORROW."
   },
   "backgroundVideo": "/assets/nira-loop.mp4",
-  "backgroundImage": "/assets/nira-official.png",
+  "backgroundImage": "/assets/nira-official.webp",
   "backgroundFit": "cover",
   "backgroundFocalPoint": "center",
   "responsiveMedia": {
@@ -572,7 +572,7 @@ export const CASE_STUDIES: CaseStudy[] = [
     "videoUrl": "/assets/work/alzara-curry-reel.mp4",
     "thumbnails": [
       "/assets/work/alzara-curry-poster.webp",
-      "/assets/work/alzara-curry-chef.png",
+      "/assets/work/alzara-curry-chef.webp",
       "/assets/industry-fmcg.jpg",
       "/assets/work/city-ooh.jpg"
     ],
@@ -599,13 +599,13 @@ export const CASE_STUDIES: CaseStudy[] = [
       },
       {
         "id": "alzara-img-2",
-        "url": "/assets/work/alzara-curry-chef.png",
+        "url": "/assets/work/alzara-curry-chef.webp",
         "type": "image",
         "aspectRatio": "9:16",
         "fit": "cover",
         "focalPoint": "center",
         "caption": "Culinary Master Endorsement & Fresh Spices",
-        "poster": "/assets/work/alzara-curry-chef.png"
+        "poster": "/assets/work/alzara-curry-chef.webp"
       }
     ],
     "challenge": "Establishing immediate credibility and consumer appetite against well-entrenched legacy curry powder brands in Malaysia.",
@@ -634,7 +634,7 @@ export const CASE_STUDIES: CaseStudy[] = [
     "videoUrl": "/assets/work/mykaapie-coffee-reel.mp4",
     "thumbnails": [
       "/assets/work/mykaapie-coffee-poster.webp",
-      "/assets/work/mykaapie-pour.png",
+      "/assets/work/mykaapie-pour.webp",
       "/assets/work/mykaapie-cup.png",
       "/assets/industry-retail.jpg"
     ],
@@ -661,13 +661,13 @@ export const CASE_STUDIES: CaseStudy[] = [
       },
       {
         "id": "mykaapie-img-2",
-        "url": "/assets/work/mykaapie-pour.png",
+        "url": "/assets/work/mykaapie-pour.webp",
         "type": "image",
         "aspectRatio": "9:16",
         "fit": "cover",
         "focalPoint": "center",
         "caption": "Rich Frothy Micro-Crema Stream",
-        "poster": "/assets/work/mykaapie-pour.png"
+        "poster": "/assets/work/mykaapie-pour.webp"
       },
       {
         "id": "mykaapie-img-3",
@@ -765,7 +765,7 @@ export const CASE_STUDIES: CaseStudy[] = [
       "/assets/who-we-are/engineer.jpg",
       "/assets/industry-logistics.jpg",
       "/assets/who-we-are/connect.jpg",
-      "/assets/nira-connected-earth.png"
+      "/assets/nira-connected-earth.webp"
     ],
     "challenge": "Modernizing public utility communication to satisfy strict ESG reporting requirements and consumer transparency expectations.",
     "approach": "Engineered an intuitive corporate storytelling experience backed by live operational metrics and interactive compliance audits.",
@@ -820,7 +820,7 @@ export const CASE_STUDIES: CaseStudy[] = [
     "coverImage": "/assets/who-we-are/engineer.jpg",
     "thumbnails": [
       "/assets/who-we-are/engineer.jpg",
-      "/assets/nira-connected-earth.png",
+      "/assets/nira-connected-earth.webp",
       "/assets/industry-sme.jpg",
       "/assets/work/cinema-camera.jpg",
       "/assets/who-we-are/create.jpg"
@@ -848,12 +848,12 @@ export const CASE_STUDIES: CaseStudy[] = [
     "total": "02",
     "title": "Southeast Asia Cross-Border Intelligence Matrix",
     "subtitle": "Real-time data visualization connecting market signals, competitor sentiment, and campaign performance across ASEAN hubs.",
-    "coverImage": "/assets/nira-connected-earth.png",
+    "coverImage": "/assets/nira-connected-earth.webp",
     "thumbnails": [
-      "/assets/nira-connected-earth.png",
+      "/assets/nira-connected-earth.webp",
       "/assets/who-we-are/engineer.jpg",
       "/assets/who-we-are/connect.jpg",
-      "/assets/nira-official.png",
+      "/assets/nira-official.webp",
       "/assets/industry-industrial.jpg"
     ],
     "challenge": "Executive leadership required a unified cockpit to monitor regional digital campaign performance across currency boundaries.",
@@ -868,7 +868,7 @@ export const CASE_STUDIES: CaseStudy[] = [
     ],
     "hasVideo": true,
     "videoUrl": "/assets/nira-loop.mp4",
-    "posterUrl": "/assets/nira-connected-earth.png"
+    "posterUrl": "/assets/nira-connected-earth.webp"
   }
 ];
 
