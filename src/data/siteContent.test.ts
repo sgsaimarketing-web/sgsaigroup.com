@@ -120,7 +120,9 @@ test('all case study assets exist on disk and non-video posters are typed as ima
     }
   }
   checkAssetExists(HERO_CONTENT.backgroundImage);
+  checkAssetExists(HERO_CONTENT.backgroundVideo);
   checkAssetExists(SITE_CONFIG.heroImage);
+  assert.ok(HERO_CONTENT.backgroundVideo && isVideoAssetUrl(HERO_CONTENT.backgroundVideo));
 });
 
 test('media URL classifiers distinguish local image assets from video reels accurately', () => {

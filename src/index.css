@@ -103,19 +103,20 @@ body {
   border-color: var(--electric-blue);
 }
 
-/* Hero section cinematic styling */
+/* Hero section cinematic styling for full-bleed widescreen teaser video */
 .hero-shade {
-  background: linear-gradient(90deg, #101318 0%, #101318 36%, rgba(16, 19, 24, 0.7) 52%, transparent 78%),
-              linear-gradient(0deg, #101318 0%, transparent 24%);
+  background: linear-gradient(90deg, rgba(16, 19, 24, 0.94) 0%, rgba(16, 19, 24, 0.86) 34%, rgba(16, 19, 24, 0.52) 58%, rgba(16, 19, 24, 0.18) 88%),
+              linear-gradient(180deg, rgba(16, 19, 24, 0.55) 0%, transparent 18%),
+              linear-gradient(0deg, #101318 0%, rgba(16, 19, 24, 0.55) 14%, transparent 32%);
 }
 
 .hero-shade-tablet {
-  background: linear-gradient(90deg, #101318 0%, rgba(16, 19, 24, 0.94) 38%, rgba(16, 19, 24, 0.72) 60%, rgba(16, 19, 24, 0.25) 100%),
+  background: linear-gradient(90deg, rgba(16, 19, 24, 0.95) 0%, rgba(16, 19, 24, 0.88) 42%, rgba(16, 19, 24, 0.58) 68%, rgba(16, 19, 24, 0.24) 100%),
               linear-gradient(0deg, #101318 0%, transparent 28%);
 }
 
 .hero-shade-mobile {
-  background: linear-gradient(0deg, #101318 0%, #101318 38%, rgba(16, 19, 24, 0.72) 58%, rgba(16, 19, 24, 0.25) 100%);
+  background: linear-gradient(0deg, #101318 0%, rgba(16, 19, 24, 0.45) 30%, transparent 65%);
 }
 
 @keyframes rise {

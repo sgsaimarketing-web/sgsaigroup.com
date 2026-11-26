@@ -161,8 +161,11 @@ function WebsiteContent() {
 
         {/* Main Content Area matching Approved Mockup Layout */}
         <main id="main-content">
-          {/* 01 — Hero: Cinematic NIRA AI World & Animated Headlines */}
-          <Hero onOpenShowreel={() => setShowShowreel(true)} />
+          {/* 01 — Hero: Cinematic NIRA AI World Widescreen Teaser & Headlines */}
+          <Hero
+            onOpenShowreel={() => setShowShowreel(true)}
+            shouldPauseBackground={Boolean(showShowreel || selectedProject)}
+          />
 
           {/* 02 — Who We Are: Master Company & Marketing Arm, 3 Disciplines (Create, Connect, Engineer) */}
           <WhoWeAre />

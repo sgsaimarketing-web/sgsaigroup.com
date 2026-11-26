@@ -55,6 +55,30 @@
     "niraBadge": {
       "title": "NIRA",
       "subtitle": "PEOPLE. IDEAS. A SMARTER TOMORROW."
+    },
+    "backgroundVideo": "/assets/nira-loop.mp4",
+    "backgroundImage": "/assets/nira-official.png",
+    "backgroundFit": "cover",
+    "backgroundFocalPoint": "center",
+    "responsiveMedia": {
+      "laptop": {
+        "aspectRatio": "16:9",
+        "fit": "cover",
+        "focalPoint": "center",
+        "heightScale": "standard"
+      },
+      "tablet": {
+        "aspectRatio": "16:9",
+        "fit": "cover",
+        "focalPoint": "center",
+        "heightScale": "standard"
+      },
+      "mobile": {
+        "aspectRatio": "16:9",
+        "fit": "cover",
+        "focalPoint": "center",
+        "heightScale": "standard"
+      }
     }
   },
   "whoWeAre": {
